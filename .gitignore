@@ -1,0 +1,29 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Build
+/build
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Virtual envs
+venv/
+.env/
+*.env
+
+# Cache
+/Cache
+
+# Disk cache
+/disk_cache
+
+# File types
+*.mzML
+*.h5
+*.log
+*.log#
+
+# Config/environment files
+MassLearn_environment.yaml

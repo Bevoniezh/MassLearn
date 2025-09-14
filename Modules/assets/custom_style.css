@@ -1,0 +1,4 @@
+/* Custom styles for RangeSlider */
+.rc-slider-mark-text {
+    color: white !important;
+}

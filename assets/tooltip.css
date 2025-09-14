@@ -1,0 +1,9 @@
+.dash-bootstrap-tooltip {
+    background-color: white !important;
+    color: black !important;
+    max-width: 200px !important;
+    border: 1px solid #ccc !important;
+}
+.dash-bootstrap-tooltip .tooltip-inner {
+    max-width: 200px !important;
+}
