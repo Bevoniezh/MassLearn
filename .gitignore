@@ -24,6 +24,7 @@ venv/
 *.h5
 *.log
 *.log#
+*.txt
 
 # Config/environment files
 MassLearn_environment.yaml
