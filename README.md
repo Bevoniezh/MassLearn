@@ -50,7 +50,7 @@ This project uses a Dash-based interface together with scientific Python tooling
 
 ## 4. Environment notes
 
-- The dependencies listed cover the modules used across the application (Dash, pandas, SciPy, PyQt, mass spectrometry tooling, etc.).
+- The dependency manifests include every third-party package imported by the Python sources, including `ezodf` for `.ods` batch templates, `psutil` for resource monitoring, and `lxml` for XML manipulation.
 - PyQt is required for features that open Plotly content in a desktop window. If you only use the web UI you can omit `PyQt5`/`PyQtWebEngine`.
 - `tkinter` is part of the standard Python distribution on Windows and macOS. On some Linux distributions you may need to install it separately (e.g. `sudo apt install python3-tk`).
 - When running on a headless server you might disable or skip the modules that rely on GUI components.
