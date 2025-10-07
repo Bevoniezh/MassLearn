@@ -1218,7 +1218,7 @@ def fg_informations(Sd):
             mode = 'positive'
         else:
             mode = 'negative'
-        adduct_df = pd.read_csv(f'./Cache/{mode}_mode_adducts.csv')
+        adduct_df = pd.read_csv(f'./data/{mode}_mode_adducts.csv')
         feature_adduct_df = feature_df.copy()
         # Loop through each row in df2 and create a new column in df3 for each 'adduct'
         for index, row in adduct_df.iterrows():
@@ -2929,9 +2929,9 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
                     exp_title = t['exp_title']
                     esi_mode = project_loaded.template_esi_mode[exp_title]
                     if esi_mode == 'pos':
-                        adducts = pd.read_csv('./Cache/positive_mode_adducts.csv')
+                        adducts = pd.read_csv('./data/positive_mode_adducts.csv')
                     elif esi_mode == 'neg':
-                        adducts = pd.read_csv('./Cache/negative_mode_adducts.csv')
+                        adducts = pd.read_csv('./data/negative_mode_adducts.csv')
                     break
             
             spectra = project_loaded.files_spectra[sample]
