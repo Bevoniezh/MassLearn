@@ -25,6 +25,36 @@ This project uses a Dash-based interface together with scientific Python tooling
    python "MassLearn 2.2.py"
    ```
 
+### Using Micromamba on Windows
+
+If you prefer Micromamba, you can reuse the same `environment.yml` without modification. The steps below assume Windows PowerShell:
+
+1. **Install Micromamba**
+   - Download the latest Windows release from the [Micromamba GitHub releases](https://github.com/mamba-org/micromamba-releases).
+   - Extract the archive and add the folder containing `micromamba.exe` to your `PATH`, or place the executable somewhere convenient such as `C:\micromamba`.
+   - Optionally initialize shell hooks so `micromamba` commands are available automatically:
+     ```powershell
+     .\micromamba.exe shell init -s powershell -p "$Env:USERPROFILE\micromamba"
+     ```
+     Reload the PowerShell session afterwards.
+2. **Create the environment** (from the repository root):
+   ```powershell
+   micromamba create -f environment.yml
+   ```
+   Micromamba will honor the named environment (`masslearn`) from the YAML file and create it under `%USERPROFILE%\micromamba\envs` unless you configured a custom root.
+3. **Activate the environment** each time you work on the project:
+   ```powershell
+   micromamba activate masslearn
+   ```
+4. **Run the application** once the prompt shows `(masslearn)`:
+   ```powershell
+   python "MassLearn 2.2.py"
+   ```
+5. **Update the environment** in the future when dependencies change:
+   ```powershell
+   micromamba update -f environment.yml
+   ```
+
 ## 3. Option B – Python virtual environment with pip
 
 1. Ensure Python 3.10 is installed and available in your PATH.
