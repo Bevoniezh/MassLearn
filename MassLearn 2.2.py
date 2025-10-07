@@ -39,6 +39,7 @@ cache.set('log', Log)
 cache.set('identity', None)
 cache.set('project', {})
 print(f'project cache app: {cache.get("project")}')
+print(f"current path: {current_path}")
 
 # remove this
 # with lz4.frame.open(r"C:\Users\Ronam\Desktop\Working_folder\Bioinformatic_projects\Molecular Network project\Projects\mock\project.masslearn", "rb") as file:
@@ -124,19 +125,7 @@ app.clientside_callback(
 from pages import login, home, analytics, untargeted_menu, untargeted_pipeline, learn
 
 
-# Load software if present
-with open('Cache/software_path_dash.dat') as fic:
-    softwares = [line.strip() for line in fic.readlines()]
-
-for soft in ['seems.exe', 'MZmine.exe', 'msconvert.exe']:
-    for i in softwares:
-        if soft in i:
-            path = i.split(' # ')[1]
-            if path == 'no':
-                cache.set(soft, None)
-            else:
-                cache.set(soft, path)
-cache.set('software', softwares)          
+#cache.set('software', softwares)          
 
 
 app.layout = html.Div([
@@ -165,5 +154,5 @@ def display_page(pathname):
     
 
 if __name__ == '__main__':
-    app.run_server(debug=False)         
+    app.run(debug=False)         
 
