@@ -7,6 +7,11 @@ This project uses a Dash-based interface together with scientific Python tooling
 - **Python 3.10** (or a Conda distribution such as [Miniconda](https://docs.conda.io/en/latest/miniconda.html)).
 - Git (if you want to clone the repository directly).
 - On Linux desktops you may need the system Qt dependencies for PyQt to display correctly (`sudo apt install libqt5gui5 libqt5webengine5` on Debian/Ubuntu-based distributions).
+- External vendor tools used by MassLearn workflows:
+  - **SeeMS** and **MSConvert** from the [ProteoWizard toolkit](http://proteowizard.sourceforge.net/).
+  - **MZmine 3** from the [MZmine project](https://mzmine.github.io/).
+
+See the section "External tools: download, licensing, and first-run setup" below for detailed installation guidance and licensing information.
 
 ## 2. Option A – Conda environment (recommended for cross-platform)
 
@@ -88,3 +93,32 @@ If you prefer Micromamba, you can reuse the same `environment.yml` without modif
 ## 5. Updating the environment
 
 Whenever you pull new changes that modify dependencies, re-run either `conda env update -f environment.yml` or `pip install -r requirements.txt` to keep your environment synchronized.
+
+## 6. External tools: download, licensing, and first-run setup
+
+MassLearn integrates with three Windows desktop applications. Install them before launching the login page so that you can register their paths when prompted.
+
+### 6.1 SeeMS (ProteoWizard)
+
+- Download the latest ProteoWizard installer from the official [download page](https://proteowizard.sourceforge.io/downloads.shtml). During installation, ensure that **SeeMS** and **MSConvert** components are selected.
+- ProteoWizard, including SeeMS and MSConvert, is distributed under the [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0). Review the license to make sure it suits your usage.
+
+### 6.2 MSConvert (ProteoWizard)
+
+- MSConvert is installed together with ProteoWizard (see above). You can verify the installation by locating `msconvert.exe` inside the ProteoWizard installation directory (typically `C:\Program Files\ProteoWizard\ProteoWizard 64-bit\`).
+- MSConvert is covered by the same Apache 2.0 license as the rest of ProteoWizard.
+
+### 6.3 MZmine 3
+
+- Download MZmine 3 from the [official release page](https://mzmine.github.io/download.html) and follow the installer instructions.
+- MZmine 3 is released under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). Make sure you can comply with the requirements of GPLv3 (or obtain a professional license if needed).
+- After installation, **launch MZmine once manually** so the license activation dialog can complete (choose the academic or professional license type as appropriate). MassLearn will not be able to start MZmine automatically until this first-run activation succeeds.
+
+### 6.4 Registering executable paths in MassLearn
+
+1. Start MassLearn and open the **Login** page.
+2. For first-time configuration—or whenever you update or reinstall any of the tools—click each software icon (SeeMS, MZmine, and MSConvert) displayed under the "Powered by" section.
+3. Enter or paste the full path to the corresponding executable (`seems.exe`, `MZmine.exe`, or `msconvert.exe`) and click **Confirm file**.
+4. MassLearn stores the paths in `Cache/software_path_dash.dat`. If an executable is moved or replaced, repeat the steps above to update the stored path.
+
+If MassLearn cannot launch a tool (for example after an update), return to the Login page and re-register the executable path.
