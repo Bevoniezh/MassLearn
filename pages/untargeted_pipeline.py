@@ -1319,7 +1319,7 @@ def manage_batch(template_n_click, batch_n_clicks, n_clicks_mzmine, n_clicks_con
             name = current_project.name + f'_{exp_title}_msn'
             batchname = os.path.join(current_project.featurepath, name + '.mzbatch')
             exportcsv = os.path.join(current_project.featurepath, name + '.csv')
-            batch_default = './Cache/batch_default.mzbatch'
+            batch_default = './data/batch_default.mzbatch'
             shutil.copyfile(batch_default, batchname) # copy reference mzbatc h(an xml file) to the feature/ folder
             
             # add file names in the new batch file, and add also the export path
@@ -1367,7 +1367,7 @@ def manage_batch(template_n_click, batch_n_clicks, n_clicks_mzmine, n_clicks_con
         name = current_project.name + f'_{exp_title}_msn'
         batchname = os.path.join(current_project.featurepath, name + '.mzbatch')
         exportcsv = os.path.join(current_project.featurepath, name + '.csv')
-        batch_default = './Cache/batch_default.mzbatch'
+        batch_default = './data/batch_default.mzbatch'
         shutil.copyfile(batch_default, batchname) # copy reference mzbatc h(an xml file) to the feature/ folder
         
         # add file names in the new batch file, and add also the export path
@@ -1929,9 +1929,9 @@ def feature_grouping(Msn_deblanked, Rt_threshold, Correlation_threshold):
             original_masses = stand_subset_df_reduced['m/z'].to_list()
             original_rt = stand_subset_df_reduced['rt'].to_list()
             if esi_mode == 'pos':
-                adducts = pd.read_csv('./Cache/positive_mode_adducts.csv')
+                adducts = pd.read_csv('./data/positive_mode_adducts.csv')
             elif esi_mode == 'neg':
-                adducts = pd.read_csv('./Cache/negative_mode_adducts.csv')
+                adducts = pd.read_csv('./data/negative_mode_adducts.csv')
             neutral_masses_possibilities_df = {} # take original masses deteted in the feautre list as keys and their potential neutral masses based on most common adducts as values (list)
             neutral_masses_possibilities_dict = {}
             feature_id_list = []

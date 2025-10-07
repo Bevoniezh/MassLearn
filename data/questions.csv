@@ -1,0 +1,33 @@
+Theme,Question,Answer 1,Answer 2,Answer 3,Correct Answer
+Statistics,"What is the median of the data set 3, 7, 9, 5?",6,5,7,4
+Statistics,What is a Type I error?,Detecting an effect that is not present,Rejecting a true null hypothesis,Accepting a false null hypothesis,4
+Statistics,What does p-value indicate?,Certainty of the data fitting the model,Probability of observing data as extreme as the sample,Resistance of the sample to change,4
+Statistics,What is the purpose of ANOVA?,To compare means of two groups,To assess variance among more than two groups,To correlate variables,4
+Statistics,What is the purpose of a confidence interval?,To estimate the range within which a population parameter lies,To calculate the mean of a sample,To determine if a dataset is normally distributed,3
+Statistics,What does standard deviation measure?,Variability or dispersion of a dataset,The average value of a dataset,The median of a dataset,3
+Liquid Chromatography,What is the main purpose of liquid chromatography?,To separate mixtures of compounds,To identify compounds,To quantify the amount of compound,3
+Liquid Chromatography,What is the mobile phase in liquid chromatography?,The liquid solvent that moves through the column,The stationary phase,The sample being analyzed,3
+Liquid Chromatography,What is the principle of liquid chromatography?,Separation based on volatility,Separation based on molecular size,Separation based on polarity,5
+Liquid Chromatography,What does HPLC stand for?,High Performance Liquid Chromatography,High Pressure Liquid Chromatography,High Precision Liquid Chromatography,3
+Liquid Chromatography,What role does the stationary phase play in liquid chromatography?,It separates compounds based on their interactions with it,It moves the compounds through the column,It identifies the compounds,3
+Liquid Chromatography,Which factor does NOT affect the separation of compounds in liquid chromatography?,The color of the compounds,The polarity of the compounds,The size of the compounds,3
+Liquid Chromatography,What does the term 'retention time' refer to in liquid chromatography?,Time a compound is detected in the detector,Time a solvent takes to pass through the column,Volume of mobile phase used,4
+Liquid Chromatography,What is gradient elution?,Using a constant mobile phase composition,Using varying concentrations of solvents,Reducing the flow rate over time,4
+Liquid Chromatography,What is the role of the mobile phase in liquid chromatography?,To carry the analytes through the column,To dissolve the stationary phase,To provide a gradient for analysis,3
+Mass Spectrometry,What is the principle of mass spectrometry?,To measure the mass-to-charge ratio of ions,To identify unknown compounds,To quantify the amount of each compound,3
+Mass Spectrometry,What does the m/z ratio represent?,Mass-to-charge ratio of ions,Molecular weight of compounds,Charge of ions,3
+Mass Spectrometry,What is a mass spectrum?,A plot of ion intensity versus m/z ratio,A list of molecular weights,A graph showing the separation of compounds,3
+Mass Spectrometry,What role does the ion source play in mass spectrometry?,It ionizes the sample,It separates the ions based on mass,It detects the ions,3
+Mass Spectrometry,Which is NOT a type of mass spectrometer?,High Performance Liquid Chromatography,Time-of-Flight,Quadrupole,3
+Mass Spectrometry,What does mass spectrometry measure?,The weight of molecules,The charge of ions,The structure of molecules,4
+Mass Spectrometry,What is the purpose of the mass analyzer in a mass spectrometer?,To separate ions by mass,To measure the m/z of an ion,To catalyze chemical reactions,4
+Mass Spectrometry,What is tandem mass spectrometry (MS/MS)?,Analysis using multiple detectors,Separation of ions into fragments for analysis,Measuring the impact of a collision on ion structure,4
+Mass Spectrometry,What is an electrospray ionization (ESI)?,A method to increase the temperature of samples,A technique to ionize large molecules at atmospheric pressure,A method to purify proteins,4
+Metabolomics,What is metabolomics?,Study of chemical processes involving drugs,Study of all metabolites in a biological system,Study of proteins and their functions,4
+Metabolomics,What does the term 'metabolic profiling' refer to?,Quantitative analysis of a single metabolite,The study of metabolites specific to a biological pathway,The study of gene expression levels,4
+Metabolomics,What is the main goal of untargeted metabolomics?,To identify all metabolites from a specific organism,To verify known metabolites in a sample,To explore novel pathways and interactions,5
+Metabolomics,What role does mass spectrometry play in metabolomics?,To separate metabolites based on their size,To identify metabolites by comparing their mass-to-charge ratio,To purify compounds before analysis,4
+Metabolomics,What is the role of metabolomics in disease diagnosis?,To identify biomarkers for diseases,To cure diseases,To understand the genetic basis of diseases,3
+Metabolomics,What technique is commonly used in metabolomics for compound identification?,Mass Spectrometry,PCR,Western Blotting,3
+Metabolomics,How does metabolomics differ from genomics?,"Metabolomics studies metabolites, genomics studies the entire genome","Metabolomics studies proteins, genomics studies DNA","Metabolomics studies cells, genomics studies genes",3
+Metabolomics,What is a metabolic pathway?,A series of chemical reactions within a cell,A method for separating metabolites,A technique for identifying metabolites,3

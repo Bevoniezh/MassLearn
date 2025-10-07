@@ -1,0 +1,68 @@
+Theme,Question,Answer 1,Answer 2,Answer 3,Correct Answer
+Statistics,"What is the median of the data set 3, 7, 9, 5?",6,5,7,3
+Statistics,What does a p-value represent?,Probability of observing the data if the null hypothesis is true,Correlation coefficient,Standard deviation,3
+Statistics,What is a Type I error?,Rejecting the null hypothesis when it is true,Accepting the null hypothesis when it is false,Calculating the wrong test statistic,3
+Statistics,What is the purpose of a confidence interval?,To estimate the range within which a population parameter lies,To calculate the mean of a sample,To determine if a dataset is normally distributed,3
+Statistics,What does standard deviation measure?,Variability or dispersion of a dataset,The average value of a dataset,The median of a dataset,3
+Liquid Chromatography,What is the main purpose of liquid chromatography?,To separate mixtures of compounds,To identify compounds,To quantify the amount of compound,3
+Liquid Chromatography,What is the mobile phase in liquid chromatography?,The liquid solvent that moves through the column,The stationary phase,The sample being analyzed,3
+Liquid Chromatography,What does HPLC stand for?,High Performance Liquid Chromatography,High Pressure Liquid Chromatography,High Precision Liquid Chromatography,3
+Liquid Chromatography,What role does the stationary phase play in liquid chromatography?,It separates compounds based on their interactions with it,It moves the compounds through the column,It identifies the compounds,3
+Liquid Chromatography,Which factor does NOT affect the separation of compounds in liquid chromatography?,The color of the compounds,The polarity of the compounds,The size of the compounds,3
+Mass Spectrometry,What is the principle of mass spectrometry?,To measure the mass-to-charge ratio of ions,To identify unknown compounds,To quantify the amount of each compound,3
+Mass Spectrometry,What does the m/z ratio represent?,Mass-to-charge ratio of ions,Molecular weight of compounds,Charge of ions,3
+Mass Spectrometry,What is a mass spectrum?,A plot of ion intensity versus m/z ratio,A list of molecular weights,A graph showing the separation of compounds,3
+Mass Spectrometry,What role does the ion source play in mass spectrometry?,It ionizes the sample,It separates the ions based on mass,It detects the ions,3
+Mass Spectrometry,Which is NOT a type of mass spectrometer?,High Performance Liquid Chromatography,Time-of-Flight,Quadrupole,3
+Metabolomics,What is metabolomics?,The study of chemical processes involving metabolites,The study of metabolism in a living organism,The study of metabolic pathways,3
+Metabolomics,What is the role of metabolomics in disease diagnosis?,To identify biomarkers for diseases,To cure diseases,To understand the genetic basis of diseases,3
+Metabolomics,What technique is commonly used in metabolomics for compound identification?,Mass Spectrometry,PCR,Western Blotting,3
+Metabolomics,How does metabolomics differ from genomics?,"Metabolomics studies metabolites, genomics studies the entire genome","Metabolomics studies proteins, genomics studies DNA","Metabolomics studies cells, genomics studies genes",3
+Metabolomics,What is a metabolic pathway?,A series of chemical reactions within a cell,A method for separating metabolites,A technique for identifying metabolites,3
+Statistics,What does the Central Limit Theorem state?,The sample mean will approximate the population mean as sample size increases.,The distribution of sample means approaches normality as sample size increases.,The variance of the sample decreases with larger samples.,4
+Statistics,"In hypothesis testing, what is a Type II error?",Accepting the null hypothesis when it is false.,Rejecting the null hypothesis when it is true.,Accepting the alternative hypothesis when it is false.,3
+Statistics,What is the purpose of a chi-squared test?,To compare observed and expected frequencies.,To test for correlation between variables.,To compare means between two groups.,3
+Statistics,What does a p-value less than 0.05 typically indicate?,Strong evidence against the null hypothesis.,The null hypothesis is true.,Data is not statistically significant.,3
+Liquid Chromatography,What is the role of the detector in HPLC – MS?,To separate the compounds in the mixture.,To identify and quantify eluted compounds.,To introduce the sample into the system.,4
+Liquid Chromatography,What is isocratic elution in liquid chromatography?,Using a constant mobile phase composition during separation.,Gradually changing the mobile phase composition.,Using a temperature gradient to separate compounds.,3
+Liquid Chromatography,Which of the following does NOT affect retention time in HPLC?,Column temperature.,Flow rate of the mobile phase.,Detector wavelength setting.,5
+Liquid Chromatography,"In normal-phase chromatography, the stationary phase is _______ and the mobile phase is _______.","non-polar, polar","polar, non-polar","polar, super-polar",4
+Mass Spectrometry,What is the main advantage of Time-of-Flight (TOF) mass analyzers compared to Orbitrap?,High throughput analysis.,Ability to handle only small molecules.,Low cost and simplicity.,3
+Mass Spectrometry,What does tandem mass spectrometry (MS/MS) allow researchers to do?,Separate ions based on charge alone.,Perform multiple rounds of mass analysis for structural information.,Ionize non-ionic compounds directly.,4
+Mass Spectrometry,"In mass spectrometry, what is fragmentation?",The recombination of ions in the detector.,The process of breaking ions into smaller pieces.,The ionization of neutral molecules.,4
+Metabolomics,What is metabolite fingerprinting in metabolomics?,Comprehensive quantification of all metabolites.,"Rapid, high-throughput screening to classify samples.",Analysis of DNA sequences related to metabolism.,4
+Metabolomics,Which of the following is a challenge in metabolomics studies?,High abundance of metabolites.,Low complexity of metabolic networks.,Metabolite diversity and dynamic range.,5
+Metabolomics,Which statistical method is commonly used in metabolomics for data reduction and visualization?,Logistic regression.,Principal Component Analysis (PCA).,Kaplan-Meier estimator.,4
+Statistics,"What does the term ""heteroscedasticity"" refer to in regression analysis?",Constant variance of errors across observations,Variance of errors changes across levels of an independent variable,Errors are normally distributed,4
+Statistics,"In a normal distribution, approximately what percentage of data falls within two standard deviations of the mean?",68.00%,95.00%,99.70%,4
+Statistics,Which statistical test is appropriate for comparing the means of more than two groups?,t-test,ANOVA (Analysis of Variance),Chi-squared test,4
+Statistics,What does multicollinearity in multiple regression indicate?,Predictors are independent of each other,Predictors are highly correlated with each other,Predictors have no relationship with the outcome,4
+Liquid Chromatography,"In reversed-phase liquid chromatography, the stationary phase is _______ and the mobile phase is _______.","non-polar, polar","polar, non-polar","polar, super-polar",3
+Liquid Chromatography,What is gradient elution in HPLC?,Using a constant mobile phase composition,Changing the mobile phase composition during separation,Using multiple detectors simultaneously,4
+Liquid Chromatography,Which detector is commonly used in HPLC for compounds absorbing UV light?,Refractive Index Detector,UV-Vis Absorbance Detector,Flame Ionization Detector,4
+Liquid Chromatography,What is the primary function of the pump in HPLC systems?,To inject the sample into the system,To deliver the mobile phase at a constant flow rate,To separate compounds based on polarity,4
+Mass Spectrometry,Which ionization technique is suitable for large biomolecules like proteins?,Electron Ionization (EI),Electrospray Ionization (ESI),Chemical Ionization (CI),4
+Mass Spectrometry,"In mass spectrometry, what is the base peak?",Ion with the highest m/z ratio,Ion with the highest relative abundance,Ion with the lowest m/z ratio,4
+Mass Spectrometry,What is the purpose of the vacuum system in a mass spectrometer?,To prevent ion collisions with gas molecules,To cool down the detector,To increase ionization efficiency,3
+Mass Spectrometry,Which mass analyzer separates ions based on their oscillations in a magnetic field?,Time-of-Flight (TOF),Quadrupole,Ion Trap,5
+Metabolomics,What is lipidomics?,The study of lipids within the metabolome,The study of lipid-related genes,The study of lipid enzymes,3
+Metabolomics,Which technology is often used for non-targeted metabolomics?,NMR Spectroscopy,PCR,ELISA,3
+Metabolomics,"In metabolomics, what is metabolite profiling?",Comprehensive analysis of all metabolites,Analysis of a predefined set of metabolites,Genetic sequencing of metabolic genes,4
+Metabolomics,Which bioinformatics tool is used for pathway analysis in metabolomics?,BLAST,KEGG (Kyoto Encyclopedia of Genes and Genomes),FASTA,4
+Statistics,What is the purpose of the F-test in statistics?,To compare two population variances,To test the mean difference between two groups,To assess the correlation between variables,3
+Statistics,"What does the term ""degrees of freedom"" refer to in statistical analysis?",The number of independent values that can vary in an analysis,The number of variables in a dataset,The sample size minus one,3
+Statistics,What is the main assumption behind parametric tests?,Data are normally distributed and have equal variances,Data are non-normally distributed,Samples are dependent,3
+Liquid Chromatography,What is the function of a guard column in HPLC?,To protect the main analytical column from contamination,To increase the pressure in the system,To act as a secondary detector,3
+Liquid Chromatography,"In size-exclusion chromatography, compounds are separated based on which property?",Polarity,Molecular size,Charge,4
+Liquid Chromatography,Which parameter describes the efficiency of a chromatographic column?,Retention factor (k),Number of theoretical plates (N),Selectivity (α),4
+Liquid Chromatography,What effect does increasing the column temperature generally have on retention time in HPLC?,Increases retention time,Decreases retention time,No effect on retention time,4
+Mass Spectrometry,What is the primary role of a magnetic sector in a mass spectrometer?,To ionize the sample molecules,To separate ions based on their mass-to-charge ratio,To detect and measure ion abundance,4
+Mass Spectrometry,"What does ""resolution"" refer to in mass spectrometry?",The ability to distinguish between ions of similar m/z ratios,The speed at which ions are detected,The overall sensitivity of the instrument,3
+Mass Spectrometry,Which ionization technique involves the use of a laser to ionize samples embedded in a matrix?,Electrospray Ionization (ESI),Matrix-Assisted Laser Desorption Ionization (MALDI),Chemical Ionization (CI),4
+Mass Spectrometry,What is the purpose of using internal standards in quantitative mass spectrometry?,To calibrate the mass analyzer,To correct for variations in sample preparation and analysis,To increase ionization efficiency,4
+Metabolomics,Which of the following platforms is NOT commonly used in metabolomics studies?,Gas Chromatography-Mass Spectrometry (GC-MS),Liquid Chromatography-Mass Spectrometry (LC-MS),Southern Blotting,5
+Metabolomics,What is the main goal of untargeted metabolomics?,To quantify a predefined set of metabolites,To analyze all measurable metabolites without bias,To study gene expression levels,4
+Metabolomics,"In metabolomics data analysis, what is normalization used for?",To adjust for technical variations between samples,To identify unknown metabolites,To enhance signal intensity in mass spectrometry,3
+Metabolomics,What is the purpose of a meta-analyis?,To find similar feature groups between experiments,To identify unknown metabolites,To simply add samples from other experiments into a larger batch,3
+Metabolomics,What is false in a meta-analyis?,We can find identical compound between experiments,A meta feature group is a unique compound found in different experiment,Meta analysis is more robust than a conventional analysis,5
+Statistics,What is a log fold change (LFC) compared to a F-test?,"Both are the same values, but not in the same context","LFC is how many times a value increases or decreases compared to another, while a F-test compare variation",F-test compare absolute averages and LFC is the proportional change of the median,4
