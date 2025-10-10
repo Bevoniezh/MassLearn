@@ -71,18 +71,28 @@ def check_software():
     """Check if all software paths are set and exist."""
     message = []
     confirmation = True
+
     for key, label in [
-        ("SeeMS", "SeeMS"),
-        ("MZmine", "MZmine"),
-        ("ProteoWizard", "ProteoWizard")
+        ("SeeMS", "seems"),
+        ("MZmine", "mzmine"),
+        ("ProteoWizard", "msconvert")
     ]:
-        path = config.get("Software", key, fallback="")
+        raw_path = config.get("Software", key, fallback="").strip()
+
+        # Remove quotes if present
+        path = raw_path.strip('"').strip("'")
+
+        # Normalize path to absolute
+        path = os.path.abspath(os.path.normpath(path))
+        print(path)
         if not path or not os.path.exists(path):
-            message.append(f"{label} is NOT defined. Upload this file from the software main folder.")
+            message.append(f"{label} is NOT defined or invalid: {raw_path}")
             confirmation = False
         else:
             message.append(f"{label} is defined at {path}.")
+
     return message, confirmation
+
 
 # -------------------------------------------------------------------
 # UI elements
@@ -251,6 +261,6 @@ def validate_selection(value):
             cache.set("identity", value)
             return dbc.Button("Enter MassLearn", color="primary", href='/home')
         else:
-            return dbc.ListGroupItem("Please define missing software paths below, then try again.", 
+            return dbc.ListGroupItem(f"Please define missing software path by cliking on the icons below, then restart MassLearn.\n\nThe missing softwares are:{' - '.join(message)}", 
                                      color="warning", style={'maxWidth': '600px', 'fontSize': '12px'})
     return ""

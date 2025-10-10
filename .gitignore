@@ -15,6 +15,7 @@ venv/
 
 # Cache
 /Cache
+/config
 
 # Disk cache
 /disk_cache
