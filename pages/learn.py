@@ -21,7 +21,9 @@ import Modules.questions as Q
 
 cache = Cache('./disk_cache')
 SESSION_CACHE_KEY = 'current_learn_session'
-USERS_FILE = Path('users.json')
+SESSION_USER_KEY = 'current_learn_user'
+DATA_DIR = Path('data')
+USERS_FILE = DATA_DIR / 'users.json'
 
 current_session_id = cache.get(SESSION_CACHE_KEY)
 
@@ -31,15 +33,35 @@ def _load_users_file():
         try:
             with USERS_FILE.open('r', encoding='utf-8') as users_file:
                 data = json.load(users_file)
-                if isinstance(data, dict):
-                    return data
         except json.JSONDecodeError:
-            pass
-    return {}
+            data = {}
+    else:
+        data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    if 'users' not in data or not isinstance(data['users'], dict):
+        # Backwards compatibility with the legacy structure {"username": [sessions]}
+        if data:
+            users = {}
+            for username, sessions in data.items():
+                if isinstance(sessions, list):
+                    users[username] = {'sessions': sessions}
+            data = {'users': users}
+        else:
+            data = {'users': {}}
+
+    return data
 
 
-def _save_users_file(data):
-    USERS_FILE.write_text(json.dumps(data, indent=2), encoding='utf-8')
+def _get_user_entry(data, user):
+    users = data.setdefault('users', {})
+    entry = users.setdefault(user, {})
+    sessions = entry.setdefault('sessions', [])
+    if not isinstance(sessions, list):
+        entry['sessions'] = []
+    return entry
 
 
 def _format_timestamp(timestamp):
@@ -52,12 +74,15 @@ def _format_timestamp(timestamp):
         return timestamp
 
 
+
 def _get_session_rows(user):
     sessions = []
     if user is None:
         return sessions
     data = _load_users_file()
-    for session in data.get(user, []):
+    user_entry = data.get('users', {}).get(user, {})
+    sessions = user_entry.get('sessions', [])
+    for session in sessions:
         started_at = _format_timestamp(session.get('started_at'))
         score = session.get('score', {})
         correct = score.get('correct', 0)
@@ -74,8 +99,9 @@ def _start_session(user):
     if user is None:
         return None
     data = _load_users_file()
+    entry = _get_user_entry(data, user)
     session_id = datetime.utcnow().isoformat()
-    entry = {
+    session_entry = {
         'session_id': session_id,
         'started_at': datetime.now().isoformat(timespec='seconds'),
         'score': {
@@ -83,7 +109,7 @@ def _start_session(user):
             'total': 0
         }
     }
-    data.setdefault(user, []).append(entry)
+    entry['sessions'].append(session_entry)
     _save_users_file(data)
     return session_id
 
@@ -92,8 +118,8 @@ def _update_session_score(user, session_id, correct, total):
     if user is None or session_id is None:
         return
     data = _load_users_file()
-    sessions = data.get(user, [])
-    for session in sessions:
+    user_entry = _get_user_entry(data, user)
+    for session in user_entry.get('sessions', []):
         if session.get('session_id') == session_id:
             session.setdefault('score', {})
             session['score']['correct'] = int(correct)
@@ -101,6 +127,7 @@ def _update_session_score(user, session_id, correct, total):
             session['updated_at'] = datetime.utcnow().isoformat()
             _save_users_file(data)
             return
+
 
 dash.register_page(__name__)
 
@@ -207,6 +234,7 @@ def open_modal(play_click, next_click, answer_a, answer_b, answer_c, is_open):
         nb_errors = 0
         current_session_id = _start_session(user)
         cache.set(SESSION_CACHE_KEY, current_session_id)
+        cache.set(SESSION_USER_KEY, user)
         
     q = Q.Questions()
     new_question = False

@@ -8,6 +8,7 @@ import os
 import json
 import configparser
 import dash
+import threading, time, os
 from dash import html, dcc, callback
 from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
@@ -159,6 +160,11 @@ software = html.Div([
     html.Br(),
 ])
 
+shutdown_button = html.Div([
+    html.Br(),
+    dbc.Button("Shutdown MassLearn", id="shutdown-button", color="danger")
+], style={'textAlign': 'center', 'marginTop': '20px'})
+
 input_temp = html.Div(id='input-div', style={
     'display': 'flex',
     'flexDirection': 'column',
@@ -173,7 +179,22 @@ layout = html.Div([
     html.H3('add a new user', style={'textAlign': 'center'}),
     text_input,
     software,
-    input_temp,
+    html.Div(id="shutdown-output", style={'textAlign': 'center'}),  # add this line
+    html.Br(),
+    html.Div(
+        dbc.Button(
+            "Shutdown MassLearn",
+            id="shutdown-button",
+            color="danger",
+            style={'minWidth': '200px'}
+        ),
+        style={
+            'display': 'flex',
+            'justifyContent': 'center',
+            'alignItems': 'center',
+            'marginTop': '10px'
+        }
+    ),input_temp,
     html.Div(id='scroll-trigger-login', style={'display': 'none'}),
 ])
 
@@ -212,6 +233,30 @@ def open_input_software(n_clicks_seems, n_clicks_mzmine, n_clicks_msconvert):
         ]),
         html.Br()
     ])]
+
+@callback(
+    [Output("shutdown-output", "children"),
+     Output("shutdown-button", "style")],
+    Input("shutdown-button", "n_clicks"),
+    prevent_initial_call=True
+)
+def shutdown_app(n):
+    if n:
+        def stop_server():
+            time.sleep(1)
+            os._exit(0)
+
+        threading.Thread(target=stop_server).start()
+
+        return (html.Div([
+            html.H2("MassLearn process is down, please close the window...", 
+                    style={'textAlign': 'center', 'marginTop': '40px'}),
+            html.Script("setTimeout(()=>{document.body.innerHTML=''; window.close();}, 1500);")
+        ]), {'display': 'none'})
+    return "", {'display': 'inline-block'}
+
+
+
 
 @callback(
     [Output("seems-button", "n_clicks"),
