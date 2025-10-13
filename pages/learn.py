@@ -5,17 +5,102 @@ Created on Thu Feb  1 09:57:47 2024
 @author: Ronan
 """
 
-import dash
-from diskcache import Cache
-import dash_bootstrap_components as dbc
-from dash.dependencies import Input, Output, State
-from dash import html, dcc, dash_table, callback_context, callback
-import pandas as pd 
-import Modules.questions as Q
+import json
 import random
-from dash.exceptions import PreventUpdate
+from datetime import datetime
+from pathlib import Path
+
+import dash
+import dash_bootstrap_components as dbc
+import pandas as pd
+from dash import dcc, dash_table, html, callback
+from dash.dependencies import Input, Output, State
+from diskcache import Cache
+
+import Modules.questions as Q
 
 cache = Cache('./disk_cache')
+SESSION_CACHE_KEY = 'current_learn_session'
+USERS_FILE = Path('users.json')
+
+current_session_id = cache.get(SESSION_CACHE_KEY)
+
+
+def _load_users_file():
+    if USERS_FILE.exists():
+        try:
+            with USERS_FILE.open('r', encoding='utf-8') as users_file:
+                data = json.load(users_file)
+                if isinstance(data, dict):
+                    return data
+        except json.JSONDecodeError:
+            pass
+    return {}
+
+
+def _save_users_file(data):
+    USERS_FILE.write_text(json.dumps(data, indent=2), encoding='utf-8')
+
+
+def _format_timestamp(timestamp):
+    if not timestamp:
+        return ''
+    try:
+        dt = datetime.fromisoformat(timestamp)
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return timestamp
+
+
+def _get_session_rows(user):
+    sessions = []
+    if user is None:
+        return sessions
+    data = _load_users_file()
+    for session in data.get(user, []):
+        started_at = _format_timestamp(session.get('started_at'))
+        score = session.get('score', {})
+        correct = score.get('correct', 0)
+        total = score.get('total', 0)
+        sessions.append({
+            'started_at': started_at,
+            'score': f"{correct}/{total}"
+        })
+    sessions.sort(key=lambda item: item.get('started_at', ''), reverse=True)
+    return sessions
+
+
+def _start_session(user):
+    if user is None:
+        return None
+    data = _load_users_file()
+    session_id = datetime.utcnow().isoformat()
+    entry = {
+        'session_id': session_id,
+        'started_at': datetime.now().isoformat(timespec='seconds'),
+        'score': {
+            'correct': 0,
+            'total': 0
+        }
+    }
+    data.setdefault(user, []).append(entry)
+    _save_users_file(data)
+    return session_id
+
+
+def _update_session_score(user, session_id, correct, total):
+    if user is None or session_id is None:
+        return
+    data = _load_users_file()
+    sessions = data.get(user, [])
+    for session in sessions:
+        if session.get('session_id') == session_id:
+            session.setdefault('score', {})
+            session['score']['correct'] = int(correct)
+            session['score']['total'] = int(total)
+            session['updated_at'] = datetime.utcnow().isoformat()
+            _save_users_file(data)
+            return
 
 dash.register_page(__name__)
 
@@ -51,24 +136,24 @@ navbar = dbc.Navbar(
 
 popup_qa = html.Div([
             dbc.Modal([
-                dbc.ModalHeader(dbc.ModalTitle(id = 'learn-modal_title')),
-                dbc.ModalBody(id = 'learn-modal_body'),
+                dbc.ModalHeader(dbc.ModalTitle(id='learn-modal_title')),
+                dbc.ModalBody(id='learn-modal_body'),
                 dbc.ModalFooter([
                     html.Div([
-                    dbc.Button(id="learn-answer_a", color="secondary", n_clicks=0),
-                    dbc.Button(id="learn-answer_b", color="secondary", n_clicks=0),
-                    dbc.Button(id="learn-answer_c", color="secondary", n_clicks=0),
-                                ], className="d-grid gap-2"),
-                    html.Div([dbc.Button(children = "Next question", id="next", color="primary", n_clicks=0)]),
-                    html.Div(children = 'Score : 0/0', id = 'score'),
-                    html.Div(children = 'Nb of errors : 0', id = 'errors')
-                    ], style={
-                            'display': 'flex',
-                            'flexDirection': 'column',
-                            'alignItems': 'center',      # Center horizontally in the flex container
-                                    })
-                    ], id="learn-modal", is_open=False)
-                ])
+                        dbc.Button(id="learn-answer_a", color="secondary", n_clicks=0),
+                        dbc.Button(id="learn-answer_b", color="secondary", n_clicks=0),
+                        dbc.Button(id="learn-answer_c", color="secondary", n_clicks=0),
+                    ], className="d-grid gap-2"),
+                    html.Div([dbc.Button(children="Next question", id="next", color="primary", n_clicks=0)]),
+                    html.Div(children='Score : 0/0', id='score'),
+                    html.Div(children='Nb of errors : 0', id='errors')
+                ], style={
+                    'display': 'flex',
+                    'flexDirection': 'column',
+                    'alignItems': 'center',      # Center horizontally in the flex container
+                })
+            ], id="learn-modal", is_open=False)
+        ])
 
 answer_save = pd.DataFrame()
 correct_answer = ''
@@ -98,7 +183,8 @@ questions_answered = {} # questions as keys, success as values
      Output("learn-answer_b", "n_clicks"),
      Output("learn-answer_c", "n_clicks"),
      Output("score", "children"),
-     Output("errors", "children")],
+     Output("errors", "children"),
+     Output("session-history", "data")],
     [Input("play", "n_clicks"),
      Input("next", "n_clicks"),
      Input("learn-answer_a", "n_clicks"),
@@ -108,14 +194,19 @@ questions_answered = {} # questions as keys, success as values
     prevent_initial_call = True
 )
 def open_modal(play_click, next_click, answer_a, answer_b, answer_c, is_open):
-    ctx = dash.callback_context    
+    ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    global answer_save, answer_1, answer_2, answer_3, successes, nb_questions, questions_answered, correct_answer, nb_errors
-    if button_id == 'play' and not(is_open):
+    global answer_save, answer_1, answer_2, answer_3, successes, nb_questions, questions_answered, correct_answer, nb_errors, current_session_id
+    user = cache.get('identity')
+    if current_session_id is None:
+        current_session_id = cache.get(SESSION_CACHE_KEY)
+    if button_id == 'play' and not is_open:
         successes = 0
         nb_questions = 0
         questions_answered = {} # question answered is here to prevent repeating to display the same question in a session
         nb_errors = 0
+        current_session_id = _start_session(user)
+        cache.set(SESSION_CACHE_KEY, current_session_id)
         
     q = Q.Questions()
     new_question = False
@@ -187,27 +278,64 @@ def open_modal(play_click, next_click, answer_a, answer_b, answer_c, is_open):
         successes = sum(questions_answered.values()) # how many valid answer
         nb_questions = len(questions_answered.keys())
         answer_save = pd.DataFrame()
-        
-        return True, title, question, answer_1, answer_2, answer_3, answer_1_color, answer_2_color, answer_3_color, True, True, True, 0, 0, 0, f'Score : {successes} / {nb_questions}', f'Nb of errors : {nb_errors}'
-    else:      
-        return True, title, question, answer_1, answer_2, answer_3, "secondary", "secondary", "secondary", None, None, None, 0, 0, 0, f'Score : {successes} / {nb_questions}', f'Nb of errors : {nb_errors}' # return invert of the current state of the modal, and the modal parameters
+        _update_session_score(user, current_session_id, successes, nb_questions)
+
+        table_data = _get_session_rows(user)
+        return True, title, question, answer_1, answer_2, answer_3, answer_1_color, answer_2_color, answer_3_color, True, True, True, 0, 0, 0, f'Score : {successes} / {nb_questions}', f'Nb of errors : {nb_errors}', table_data
+    else:
+        table_data = _get_session_rows(user)
+        return True, title, question, answer_1, answer_2, answer_3, "secondary", "secondary", "secondary", None, None, None, 0, 0, 0, f'Score : {successes} / {nb_questions}', f'Nb of errors : {nb_errors}', table_data # return invert of the current state of the modal, and the modal parameters
 
 
 
 
 navbar_height = '50px'
+
+
 def get_layout():
-    if cache.get('identity') is not None:
+    identity = cache.get('identity')
+    if identity is not None:
+        session_rows = _get_session_rows(identity)
         return html.Div([
             popup_qa,
             html.Div(navbar, style={'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'zIndex': 1000}),
-            html.Div([dbc.Button("I want to learn!", id='play', n_clicks=0, color="primary"),
-                                  ], 
-                    style={'position': 'absolute',  # Positioning the div absolutely inside its relative parent
-                            'top': '50%',            # Centering vertically
-                            'left': '50%',           # Centering horizontally
-                            'transform': 'translate(-50%, -50%)'  # Adjusting the exact center position
-                        }),
+            html.Div([
+                dbc.Button("I want to learn!", id='play', n_clicks=0, color="primary"),
+                html.Div(
+                    dash_table.DataTable(
+                        id='session-history',
+                        columns=[
+                            {"name": "Session start", "id": "started_at"},
+                            {"name": "Score", "id": "score"}
+                        ],
+                        data=session_rows,
+                        style_table={'maxHeight': '300px', 'overflowY': 'auto', 'width': '100%'},
+                        style_cell={
+                            'textAlign': 'center',
+                            'padding': '6px',
+                            'backgroundColor': 'white',
+                            'color': 'black'
+                        },
+                        style_header={
+                            'backgroundColor': '#333333',
+                            'color': 'white',
+                            'fontWeight': 'bold'
+                        },
+                        page_action='none'
+                    ),
+                    style={'marginTop': '20px', 'width': '100%', 'maxWidth': '500px'}
+                )
+
+            ],
+                style={
+                    'display': 'flex',
+                    'flexDirection': 'column',
+                    'alignItems': 'center',
+                    'justifyContent': 'center',
+                    'minHeight': '100vh',
+                    'paddingTop': navbar_height,
+                    'gap': '1rem'
+                }),
         ])
     else:
         return dcc.Link('Go to login', href='/login')

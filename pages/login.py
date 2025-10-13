@@ -258,7 +258,13 @@ def validate_selection(value):
         message, ok = check_software()
         if ok:
             update_config("General", "last_user", value)
-            cache.set("identity", value)
+            log = f'Selected user: {value}'
+            Log = cache.get('log')
+            cache.set('identity', value)
+            cache.set('current_learn_session', None)
+            Log.user = value
+            Log.update(log)
+            cache.set('log', Log)
             return dbc.Button("Enter MassLearn", color="primary", href='/home')
         else:
             return dbc.ListGroupItem(f"Please define missing software path by cliking on the icons below, then restart MassLearn.\n\nThe missing softwares are:{' - '.join(message)}", 

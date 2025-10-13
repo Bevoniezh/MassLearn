@@ -19,7 +19,7 @@ class Software():
         self.path = {}
         msconvert = ['ProteoWizard', 'msconvert.exe']
         mzmine = ['MZmine', 'MZmine.exe'] 
-        with open('./Cache/software_path.dat', 'r+') as f:
+        with open('./data/software_path.dat', 'r+') as f:
             file = f.readlines()
             for software, line in zip([msconvert, mzmine], file):
                 if software[1] not in line:
@@ -46,7 +46,7 @@ class Software_DashApp():
         msconvert = ['ProteoWizard', 'msconvert.exe']
         mzmine = ['MZmine', 'MZmine.exe'] 
         seems = ['SeeMS', 'seems.exe']
-        with open('./Cache/software_path_dash.dat', 'r+') as f:
+        with open('./data/software_path_dash.dat', 'r+') as f:
             file = f.readlines()
             for software, line in zip([seems, mzmine, msconvert], file):
                 if software[1] not in line:
@@ -102,7 +102,7 @@ class LogManager():
         self.session = ''
         self.kill_log() # when new session of MassLearn is run, the previous log is reset
         self.user = None # is the user of the current session
-        self.general = './Cache/log-backup' # this is a log text wich will be never deleted, until it is deleted it will store every information updated on the log of all user for all sessions
+        self.general = './data/log-backup' # this is a log text wich will be never deleted, until it is deleted it will store every information updated on the log of all user for all sessions
         
     def update(self, Text_input, Project = None):
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S") 
@@ -110,7 +110,7 @@ class LogManager():
             file.write(f'{now} -- {Text_input}\n')     
         with open(self.general, 'a') as file:
             file.write(f'{now} -- {Text_input}\n') 
-        with open(f'Cache/{self.user}.log', 'a') as file: # append user's log
+        with open(f'data/{self.user}.log', 'a') as file: # append user's log
             file.write(f'{now} -- {Text_input}\n') 
         if Project != None:
             Project.update_log(f'{now} -- {Text_input}\n')
