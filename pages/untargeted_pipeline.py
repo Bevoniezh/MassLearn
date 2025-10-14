@@ -500,27 +500,88 @@ project_part = html.Div([
                     ])    
 
                     
-# 3- Select raw dir or continue with mzml files          
+# 3- Select raw dir or continue with mzml files
 ###############################################################################
-# Function to get all .raw files from a directory
-def get_raw_files(Directory):
+RAW_FILE_TYPES = {
+    'waters': {
+        'label': 'Waters (.raw folders)',
+        'placeholder': r"C:\\Users\\Arthur\\Waters_raw",
+        'hint': 'Waters .raw folders containing _FUNC001.DAT files',
+    },
+    'thermo': {
+        'label': 'Thermo (.raw files/folders)',
+        'placeholder': r"C:\\Users\\Arthur\\Thermo_raw",
+        'hint': 'Thermo .raw files or folders',
+    },
+    'bruker': {
+        'label': 'Bruker (.d folders)',
+        'placeholder': r"C:\\Users\\Arthur\\Bruker_d",
+        'hint': 'Bruker .d folders',
+    },
+    'sciex': {
+        'label': 'SCIEX (.wiff files)',
+        'placeholder': r"C:\\Users\\Arthur\\Sciex_wiff",
+        'hint': 'SCIEX .wiff files (with associated .scan files if applicable)',
+    },
+}
+DEFAULT_RAW_FILE_TYPE = 'waters'
+
+@callback(
+    Output('raw-dir-input', 'placeholder'),
+    Output('raw-dir-guidance', 'children'),
+    Input('raw-file-type', 'value')
+)
+def update_raw_dir_guidance(file_type):
+    file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+    info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
+    guidance = f"Expected: {info['hint']}." if info.get('hint') else ''
+    return info.get('placeholder', r"C:\\Users\\Arthur\\Raw-files"), guidance
+
+# Function to get all vendor files from a directory
+def get_raw_files(Directory, file_type = DEFAULT_RAW_FILE_TYPE):
     rawfiles = []
+    file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
     for root, dirs, files in os.walk(Directory):
-        for d in dirs:
-            if d.lower().endswith('.raw'):
-                rawfiles.append(os.path.join(root, d))
-            elif d.lower().endswith('.RAW'):
-                rawfiles.append(os.path.join(root, d))
+        if file_type in ['waters', 'thermo']:
+            for d in dirs:
+                if d.lower().endswith('.raw'):
+                    rawfiles.append(os.path.join(root, d))
+            if file_type == 'thermo':
+                for f in files:
+                    if f.lower().endswith('.raw'):
+                        rawfiles.append(os.path.join(root, f))
+        elif file_type == 'bruker':
+            for d in dirs:
+                if d.lower().endswith('.d'):
+                    rawfiles.append(os.path.join(root, d))
+        elif file_type == 'sciex':
+            for f in files:
+                if f.lower().endswith('.wiff') or f.lower().endswith('.wiff2'):
+                    rawfiles.append(os.path.join(root, f))
     return rawfiles
-    
-# Function to check if there are .raw files in the folder
-def check_raw_contents(dir_path):
-    for entry in os.listdir(dir_path):   
-        if os.path.splitext(entry)[1].lower() == '.raw':
-            full_path = os.path.join(dir_path, entry)
-            for subentry in os.listdir(full_path):
-                if subentry == '_FUNC001.DAT':
-                    return True
+
+# Function to check if there are vendor files in the folder
+def check_raw_contents(dir_path, file_type = DEFAULT_RAW_FILE_TYPE):
+    file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+    try:
+        entries = os.listdir(dir_path)
+    except FileNotFoundError:
+        return False
+    if file_type == 'waters':
+        for entry in entries:
+            if entry.lower().endswith('.raw'):
+                full_path = os.path.join(dir_path, entry)
+                if os.path.isdir(full_path):
+                    for subentry in os.listdir(full_path):
+                        if subentry == '_FUNC001.DAT':
+                            return True
+        return False
+    elif file_type == 'thermo':
+        return any(entry.lower().endswith('.raw') for entry in entries)
+    elif file_type == 'bruker':
+        return any(entry.lower().endswith('.d') for entry in entries)
+    elif file_type == 'sciex':
+        return any(entry.lower().endswith('.wiff') or entry.lower().endswith('.wiff2') for entry in entries)
     return False
 
 @callback(
@@ -560,12 +621,13 @@ mzml_loading = 0
      ],
     [Input("raw-dir-input", "n_submit"),
      Input("mzml-alternative", "n_clicks")],
-    [State("raw-dir-input", "value")],
+    [State("raw-dir-input", "value"),
+     State('raw-file-type', 'value')],
     prevent_initial_call = True
 )
-def validate_raw_input(n_submit, n_clicks, path_to_check):
+def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
     global current_project, mzml_alternative, line_count, mzml_loading
-    ctx = dash.callback_context    
+    ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
     if not ctx.triggered:
         raise PreventUpdate
@@ -604,43 +666,55 @@ def validate_raw_input(n_submit, n_clicks, path_to_check):
     
     if n_submit:
         path_to_check = normalize_path(path_to_check)
+        file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+        info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
         # Add your validation logic here
-        if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check):  
-            Log = cache.get('log')  
+        if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
+            Log = cache.get('log')
             Log.update(f'Raw files path: {path_to_check} added.')
-            cache.set('log', Log)  
+            cache.set('log', Log)
 
-            current_project.raw_folder_path = path_to_check            
-            current_project.raw_files_path = get_raw_files(path_to_check)
+            current_project.raw_folder_path = path_to_check
+            current_project.raw_file_type = file_type
+            current_project.raw_files_path = get_raw_files(path_to_check, file_type)
             cache.set('project_loaded', current_project)
             separating_line = create_separating_line(line_count)
             line_count += 1
             new_popup = html.Div(children = '', id={"type": "popup", "index": 3}, style={'display': 'none'})
             return [separating_line, new_popup, convert_raw], "Path successfully loaded!", True, None, True, 'y'
         else:
-            return "", "Not a valid path! Make sure the folder exists, verify if the path is not a file, and if it contains at least one valid .raw file", None, True, False, 'n'
+            return "", f"Not a valid path! Make sure the folder exists, verify it is not a file, and confirm it contains at least one {info['hint']}.", None, True, False, 'n'
 
     raise PreventUpdate()
 
 raw_dir = html.Div([
             html.Div([
-                html.H5('Indicate the folder where are your .raw files, and press Enter', style={'textAlign': 'center'}),
-                dbc.ListGroupItem('WARNING! The conversion procedure necessitate to remove "_FUNC003" related files .raw, meaning the files where \
-        the lockspray (ms reference) were recorded. We recommend you to never convert directly from your original \
-        storage server, but rather from a copy folder.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
+                html.H5('Select your vendor format, point to the folder containing the raw data, and press Enter', style={'textAlign': 'center'}),
+                dbc.ListGroupItem('WARNING! For Waters data, the conversion procedure removes "_FUNC003" related files (.raw) corresponding to lockspray references. We recommend converting a copy of your raw data rather than the originals.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
+                html.Br(),
+                dbc.RadioItems(
+                    id='raw-file-type',
+                    options=[{'label': value['label'], 'value': key} for key, value in RAW_FILE_TYPES.items()],
+                    value=DEFAULT_RAW_FILE_TYPE,
+                    inputClassName='me-2',
+                    labelClassName='d-block',
+                    className='mb-2',
+                    style={'maxWidth': '600px'}
+                ),
+                html.Div(id='raw-dir-guidance', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
                 html.Br(),
                 dbc.Input(id="raw-dir-input", valid = None, placeholder=r"C:\Users\Arthur\Raw-files", type="text", style={'maxWidth': '600px'}),
                 html.Br(),
                 dcc.Interval(id='mzml-interval-component', interval=500, n_intervals=0, max_intervals=-1, disabled = True),  # Checks every second
-                dbc.Button('My .raw files are already in .mzML', id = "mzml-alternative", color="primary", n_clicks=0, style={"width": "300px"}), 
+                dbc.Button('My files are already .mzML', id = "mzml-alternative", color="primary", n_clicks=0, style={"width": "300px"}),
                 dbc.Progress(id="mzml-progress", color="success", style={'display':'none'}, className='mt-1'),
                 html.Br(),
                 dbc.Tooltip(
-                    "MassLearn check for at least one valid .raw folder containing _FUNC001.DAT file",
+                    "MassLearn verifies that the selected folder contains at least one file matching the chosen vendor format.",
                     target="raw-dir-input",  # ID of the component to which the tooltip is attached
                     placement="left"),
                 html.P(children = '\n', id="raw-dir-output"),
-                html.Br(),                
+                html.Br(),
                 ], style={
                         'display': 'flex',
                         'flexDirection': 'column',
@@ -699,7 +773,7 @@ def open_seems(n_clicks):
                                 
 convert_raw = html.Div([ 
                 html.Div([        
-                    dbc.ListGroupItem("""The first step of the pipeline is to convert .raw files from the Waters LCMS platform in .mzML format. To peform this, we need to define also a new elution time range, default is from 50 sec to 360 sec.\
+                    dbc.ListGroupItem("""The first step of the pipeline is to convert vendor-specific raw files (Waters, Thermo, Bruker, SCIEX) into the open mzML format. To perform this, we also define a new elution time range, default is from 50 sec to 360 sec.\
                 \n\n # TIP # Usually in LCMS, we use a gradient of compounds in the mobile phase. For example in reverse phase, different \
                 proportion of Acetonitrile and Methanol from the begining to the end of the elution. This change the compound affinity in selectivity, retention time, peak shape,signal intensity and solubility. \
                 As a consequence, polar compounds reverse phase tends to elute all together at the beggining and more apolar ones together at the end. \
@@ -711,7 +785,7 @@ convert_raw = html.Div([
                     dbc.Alert([
                         html.Div([
                             html.H6("Warning", style={'margin-top': '0px', 'margin-bottom': '5px'}),  # Reduce bottom margin
-                            html.P("Open SeeMS, load the .raw files and estimate min and maxi retention time.", style={'margin-top': '0px', 'margin-bottom': '0px'}),
+                            html.P("Open SeeMS, load the raw vendor files and estimate min and max retention time.", style={'margin-top': '0px', 'margin-bottom': '0px'}),
                             # Reduced top and bottom margins
                         ], style={
                             'display': 'flex',
@@ -756,7 +830,7 @@ convert_raw = html.Div([
                     html.Br(),
                     dbc.Button('Save conversion', id = "convert-range-button", color="primary", n_clicks=0),       
                     dbc.Tooltip(
-                        "Minimum rt and maximum rt (sec) to crop your .raw files",
+                        "Minimum rt and maximum rt (sec) to crop your raw files based on the selected vendor format",
                         target="convert-input",  # ID of the component to which the tooltip is attached
                         placement="left"),
                     
@@ -946,6 +1020,7 @@ def process_files(files):
     Proteowizard_path = soft.path['ProteoWizard'] 
     
     start_time = time.time()
+    file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
     for nb, file in enumerate(files):
         try:
             # Define all types of file name, path, etc
@@ -958,7 +1033,7 @@ def process_files(files):
             current_project.mzml_files_path.append(mzmlfolder_mzmlfile_path)
             current_project.sample_names.append(sample_name)
             # Convert the file
-            raw_to_convert = convert.RawToMZml([rawfile_path], current_project.rt_range[0], current_project.rt_range[1])
+            raw_to_convert = convert.RawToMZml([rawfile_path], current_project.rt_range[0], current_project.rt_range[1], file_type)
             raw_to_convert.convert_file(Log, Proteowizard_path ) # convert AND adjust scans of the file
             size_in_bytes = os.path.getsize(rawfolder_mzmlfile_path)            
             size_in_kb = size_in_bytes / 1024 # Convert the size from bytes to kilobytes (1 KB = 1024 bytes)

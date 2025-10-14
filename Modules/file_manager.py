@@ -242,6 +242,7 @@ class Project():
             self.noise_trace_threshold = None
             self.ms1_noise = None # noise count threshold
             self.ms2_noise = None
+            self.raw_file_type = 'waters'
             # Parameters for MZmine and NeatMS
             self.featurelist = {} # key are sub projects names (feature list), values list of feature lists names generated via mzmine, they are not already combined
             self.files_spectra = {} # Dict of cleaning.spectra object, based on files names in self.files_path 
@@ -303,8 +304,12 @@ class Project():
                 self.log = loaded_project.log
                 self.noise_trace_threshold = loaded_project.noise_trace_threshold 
                 self.rt_range = loaded_project.rt_range 
-                self.ms1_noise = loaded_project.ms1_noise 
-                self.ms2_noise = loaded_project.ms2_noise 
+                self.ms1_noise = loaded_project.ms1_noise
+                self.ms2_noise = loaded_project.ms2_noise
+                try:
+                    self.raw_file_type = loaded_project.raw_file_type
+                except AttributeError:
+                    self.raw_file_type = 'waters'
     
     # Function to add a featurelist to the feature list dictionnary. For each, it creates a sub dictionnary where all concerned feature lists are stored and manages with sames keys
     def add(self, Featurelistname): # Categorie is the type of list, they are kyes from the dictionnary
