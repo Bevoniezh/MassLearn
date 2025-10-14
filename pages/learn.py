@@ -22,10 +22,21 @@ import Modules.questions as Q
 cache = Cache('./disk_cache')
 SESSION_CACHE_KEY = 'current_learn_session'
 SESSION_USER_KEY = 'current_learn_user'
-DATA_DIR = Path('data')
-USERS_FILE = DATA_DIR / 'users.json'
+BASE_DIR = Path(__file__).resolve().parent.parent
+USERS_FILE = BASE_DIR / 'users.json'
 
 current_session_id = cache.get(SESSION_CACHE_KEY)
+
+
+def _normalise_sessions(raw_sessions):
+    """Return a list of session dictionaries regardless of the legacy format."""
+    if isinstance(raw_sessions, list):
+        return [session for session in raw_sessions if isinstance(session, dict)]
+    if isinstance(raw_sessions, dict):
+        sessions = [session for session in raw_sessions.values() if isinstance(session, dict)]
+        sessions.sort(key=lambda item: item.get('started_at', '') or item.get('session_id', ''))
+        return sessions
+    return []
 
 
 def _load_users_file():
@@ -38,31 +49,48 @@ def _load_users_file():
     else:
         data = {}
 
+    if isinstance(data, dict) and 'users' in data:
+        if isinstance(data['users'], dict):
+            data = data['users']
+        else:
+            data = {}
+
     if not isinstance(data, dict):
         data = {}
 
-    if 'users' not in data or not isinstance(data['users'], dict):
-        # Backwards compatibility with the legacy structure {"username": [sessions]}
-        if data:
-            users = {}
-            for username, sessions in data.items():
-                if isinstance(sessions, list):
-                    users[username] = {'sessions': sessions}
-            data = {'users': users}
-        else:
-            data = {'users': {}}
+    normalised = {}
+    needs_save = False
+    for username, entry in data.items():
+        if not isinstance(username, str):
+            continue
+        if isinstance(entry, dict):
+            sessions = _normalise_sessions(entry.get('sessions', []))
+            if sessions != entry.get('sessions'):
+                needs_save = True
+            normalised[username] = {'sessions': sessions}
+        elif isinstance(entry, list):
+            normalised[username] = {'sessions': _normalise_sessions(entry)}
+            needs_save = True
+    if needs_save or normalised != data or not USERS_FILE.exists():
+        _save_users_file(normalised)
+    return normalised
 
-    return data
+
+def _save_users_file(data):
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with USERS_FILE.open('w', encoding='utf-8') as users_file:
+        json.dump(data, users_file, indent=2, sort_keys=True)
 
 
 def _get_user_entry(data, user):
-    users = data.setdefault('users', {})
-    entry = users.setdefault(user, {})
-    sessions = entry.setdefault('sessions', [])
-    if not isinstance(sessions, list):
-        entry['sessions'] = []
+    entry = data.setdefault(user, {})
+    sessions = entry.get('sessions', [])
+    normalised = _normalise_sessions(sessions)
+    if normalised != sessions:
+        entry['sessions'] = normalised
+    else:
+        entry.setdefault('sessions', [])
     return entry
-
 
 def _format_timestamp(timestamp):
     if not timestamp:
@@ -74,52 +102,54 @@ def _format_timestamp(timestamp):
         return timestamp
 
 
-
 def _get_session_rows(user):
-    sessions = []
+    rows = []
     if user is None:
-        return sessions
+        return rows
     data = _load_users_file()
-    user_entry = data.get('users', {}).get(user, {})
-    sessions = user_entry.get('sessions', [])
-    for session in sessions:
+    user_entry = data.get(user, {})
+    for session in user_entry.get('sessions', []):
         started_at = _format_timestamp(session.get('started_at'))
         score = session.get('score', {})
         correct = score.get('correct', 0)
         total = score.get('total', 0)
-        sessions.append({
+        rows.append({
             'started_at': started_at,
             'score': f"{correct}/{total}"
         })
-    sessions.sort(key=lambda item: item.get('started_at', ''), reverse=True)
-    return sessions
+    rows.sort(key=lambda item: item.get('started_at', ''), reverse=True)
+    return rows
 
 
 def _start_session(user):
     if user is None:
         return None
     data = _load_users_file()
-    entry = _get_user_entry(data, user)
     session_id = datetime.utcnow().isoformat()
-    session_entry = {
+    entry = {
         'session_id': session_id,
         'started_at': datetime.now().isoformat(timespec='seconds'),
-        'score': {
-            'correct': 0,
-            'total': 0
-        }
+        'score': {'correct': 0, 'total': 0}
     }
-    entry['sessions'].append(session_entry)
+
+    # ensure correct structure
+    user_entry = data.setdefault(user, {'sessions': []})
+    sessions = user_entry.setdefault('sessions', [])
+    sessions.append(entry)
+
     _save_users_file(data)
     return session_id
+
 
 
 def _update_session_score(user, session_id, correct, total):
     if user is None or session_id is None:
         return
     data = _load_users_file()
-    user_entry = _get_user_entry(data, user)
-    for session in user_entry.get('sessions', []):
+    user_entry = data.get(user, {})
+    sessions = user_entry.get('sessions', [])
+
+    for session in sessions:
         if session.get('session_id') == session_id:
             session.setdefault('score', {})
             session['score']['correct'] = int(correct)
@@ -234,7 +264,6 @@ def open_modal(play_click, next_click, answer_a, answer_b, answer_c, is_open):
         nb_errors = 0
         current_session_id = _start_session(user)
         cache.set(SESSION_CACHE_KEY, current_session_id)
-        cache.set(SESSION_USER_KEY, user)
         
     q = Q.Questions()
     new_question = False

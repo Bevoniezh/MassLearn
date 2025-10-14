@@ -7,6 +7,7 @@ MassLearn Login Page
 import os
 import json
 import configparser
+from pathlib import Path
 import dash
 import threading, time, os
 from dash import html, dcc, callback
@@ -16,20 +17,20 @@ from diskcache import Cache
 
 # -------------------------------------------------------------------
 # Directories
-BASE_DIR = os.getcwd()
-CONFIG_DIR = os.path.join(BASE_DIR, "config")
-DATA_DIR = os.path.join(BASE_DIR, "data")
-os.makedirs(CONFIG_DIR, exist_ok=True)
-os.makedirs(DATA_DIR, exist_ok=True)
+BASE_DIR = Path(__file__).resolve().parent.parent
+CONFIG_DIR = BASE_DIR / "config"
+DATA_DIR = BASE_DIR / "data"
+CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+CONFIG_FILE = CONFIG_DIR / "config.ini"
+USERS_FILE = BASE_DIR / "users.json"
 
-CONFIG_FILE = os.path.join(CONFIG_DIR, "config.ini")
-USERS_FILE = os.path.join(CONFIG_DIR, "users.json")
 
 # -------------------------------------------------------------------
 # Initialize config.ini if missing
 config = configparser.ConfigParser()
 
-if not os.path.exists(CONFIG_FILE):
+if not CONFIG_FILE.exists():
     config["Software"] = {
         "SeeMS": "",
         "MZmine": "",
@@ -38,19 +39,72 @@ if not os.path.exists(CONFIG_FILE):
     config["General"] = {
         "last_user": ""
     }
-    with open(CONFIG_FILE, "w") as f:
+    with CONFIG_FILE.open("w") as f:
         config.write(f)
 
 config.read(CONFIG_FILE)
 
 # -------------------------------------------------------------------
-# Initialize users.json if missing
-if not os.path.exists(USERS_FILE):
-    with open(USERS_FILE, "w") as f:
-        json.dump({"users": []}, f, indent=2)
+# User data helpers
 
-with open(USERS_FILE) as f:
-    userlist = json.load(f)["users"]
+def _normalise_sessions(raw_sessions):
+    if isinstance(raw_sessions, list):
+        return [session for session in raw_sessions if isinstance(session, dict)]
+    if isinstance(raw_sessions, dict):
+        sessions = [session for session in raw_sessions.values() if isinstance(session, dict)]
+        sessions.sort(key=lambda item: item.get("started_at", "") or item.get("session_id", ""))
+        return sessions
+    return []
+
+
+def _load_users():
+    if USERS_FILE.exists():
+        try:
+            with USERS_FILE.open("r", encoding="utf-8") as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            data = {}
+    else:
+        data = {}
+
+    if isinstance(data, dict) and "users" in data:
+        legacy_users = data["users"]
+        if isinstance(legacy_users, dict):
+            data = legacy_users
+        else:
+            data = {}
+
+    if not isinstance(data, dict):
+        data = {}
+
+    normalised = {}
+    needs_save = False
+    for username, entry in data.items():
+        if isinstance(entry, dict):
+            sessions = _normalise_sessions(entry.get("sessions", []))
+            if sessions != entry.get("sessions"):
+                needs_save = True
+            normalised[username] = {"sessions": sessions}
+        elif isinstance(entry, list):
+            normalised[username] = {"sessions": _normalise_sessions(entry)}
+            needs_save = True
+    if needs_save or normalised != data:
+        _save_users(normalised)
+    return normalised
+
+
+def _save_users(data):
+    USERS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with USERS_FILE.open("w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+
+
+users_data = _load_users()
+_save_users(users_data)
+
+
+def _get_dropdown_items():
+    return [{"label": name, "value": name} for name in sorted(users_data.keys())]
 
 # -------------------------------------------------------------------
 # DiskCache for runtime
@@ -60,12 +114,12 @@ dash.register_page(__name__)
 # -------------------------------------------------------------------
 # Helpers
 def save_users(userlist):
-    with open(USERS_FILE, "w") as f:
-        json.dump({"users": sorted(userlist)}, f, indent=2)
+    """Deprecated helper retained for compatibility."""
+    _save_users({name: {"sessions": []} for name in userlist})
 
 def update_config(section, key, value):
     config.set(section, key, value)
-    with open(CONFIG_FILE, "w") as f:
+    with CONFIG_FILE.open("w") as f:
         config.write(f)
 
 def check_software():
@@ -98,7 +152,7 @@ def check_software():
 # -------------------------------------------------------------------
 # UI elements
 
-dropdown_items = [{"label": text, "value": text} for text in sorted(userlist)]
+dropdown_items = _get_dropdown_items()
 
 select = html.Div([
     dbc.Select(
@@ -281,17 +335,22 @@ def software_output(confirm, input_soft):
     State("input", "value")
 )
 def validate_input(n_submit, value):
-    global userlist, dropdown_items
-    if n_submit:
-        if len(value) > 6 and (' ' in value) and (value not in userlist):
-            userlist.append(value)
-            save_users(userlist)
-            dropdown_items = [{"label": text, "value": text} for text in sorted(userlist)]
-            return f"{value} successfully added! Now select it from the list.", True, None, dropdown_items
-        elif value in userlist:
-            return f"{value} already exists. Select it in the list.", None, True, dropdown_items
+    global dropdown_items
+    if n_submit and value:
+        trimmed = value.strip()
+        options = _get_dropdown_items()
+        if len(trimmed) > 6 and (' ' in trimmed) and (trimmed not in users_data):
+            users_data[trimmed] = {"sessions": []}
+            _save_users(users_data)
+            dropdown_items = _get_dropdown_items()
+            return f"{trimmed} successfully added! Now select it from the list.", True, None, dropdown_items
+        elif trimmed in users_data:
+            dropdown_items = options
+            return f"{trimmed} already exists. Select it in the list.", None, True, dropdown_items
         else:
+            dropdown_items = options
             return "Your name must be at least 6 letters and contain a space. Ex: Arthur Smith", None, True, dropdown_items
+    dropdown_items = _get_dropdown_items()
     return "", None, None, dropdown_items
 
 @callback(
