@@ -13,21 +13,22 @@ from Modules.file_manager import MassLearn_directory as MLD
 
 class RawToMZml():
     """
-    Class to convert a .raw proprietary files from Waters to MZml files
+    Class to convert proprietary vendor files to mzML files using ProteoWizard.
     Have to be used as follow:
-        raw_to_convert = convert.RawToMZml(abs/rel_path, min_elution_time, max_elution_time)
-        raw_to_convert.convert_file(Log, MsconvertPath) # convert AND adjust scans of the file
+        raw_to_convert = convert.RawToMZml(abs/rel_path, min_elution_time, max_elution_time, file_type)
+        raw_to_convert.convert_file(Log, MsconvertPath) # convert AND adjust scans of the file when required
     """
-    def __init__(self, Waters_Raw_files_list, Mini = 50, Maxi = 360):
+    def __init__(self, Raw_files_list, Mini = 50, Maxi = 360, File_type = 'waters'):
         self.mini = str(Mini) # minimum elution time (default 50 sec)
         self.maxi = str(Maxi) # maximum elution time (default 360 sec)
-        self.waters = Waters_Raw_files_list # it must be absolute paths list
+        self.raw_files = Raw_files_list # it must be absolute paths list
+        self.file_type = File_type.lower() if File_type else 'waters'
         self.begin = time.time()
         
     # Function to adjust the scan number and put them in ascending order, have to be used afer convert_file()
     def adjust(self, Log, File): # do both tasks to avoid opening the File two times (it can be almost 20 s to open)
-        file = File[:-4]
-        mzml = file + '.mzML'  
+        file, _ = os.path.splitext(File)
+        mzml = file + '.mzML'
         with open(mzml, 'r') as f:
             # Open a new file for writing
             with open(mzml[:-5]+'_adjusted.mzML', 'w') as output_file:                
@@ -57,19 +58,24 @@ class RawToMZml():
     # This funciton use msconvert to generate mzML files, but the ouput files are not correct concerning the scan numbers, you need after to use cuntion adjust()
     def convert_file(self, Log, MSconvert_path):
         # 1- Delete all func3 (meaning the lockspray signal) from raw files:        
-        prefix = "_FUNC003" # Define the prefix to look for in file names       
-        for raw in self.waters:
-            for file in os.listdir(raw): # Iterate through all subfolders and remove files with the prefix
-                if file.startswith(prefix):
-                    os.remove(os.path.join(raw, file)) # remove _FUNC003 definitively
-                    # TODO: Indicate in MassLEarn it removes definitively func003
-                    
+        prefix = "_FUNC003" # Define the prefix to look for in file names
+        if self.file_type == 'waters':
+            for raw in self.raw_files:
+                if os.path.isdir(raw):
+                    for file in os.listdir(raw): # Iterate through all subfolders and remove files with the prefix
+                        if file.startswith(prefix):
+                            os.remove(os.path.join(raw, file)) # remove _FUNC003 definitively
+                            # TODO: Indicate in MassLEarn it removes definitively func003
+
         # 2- Take MSconvert
         proteowizard = MSconvert_path #TODO adapt also for linux
         scantime = f"scanTime [{self.mini},{self.maxi}]"
-        os.chdir(os.path.dirname(self.waters[0])) # redirect the working directory to the folder where there are your .raw file, for the subprocess to generate the mzML files in the right folder
-        if self.waters != []:
-            for water in self.waters:
+        if self.raw_files:
+            first_parent = os.path.dirname(self.raw_files[0])
+            if first_parent:
+                os.chdir(first_parent) # redirect the working directory to the folder where there are your raw file, for the subprocess to generate the mzML files in the right folder
+        if self.raw_files != []:
+            for raw_file in self.raw_files:
                 cmd = [
                         proteowizard,
                         "--32",
@@ -79,17 +85,21 @@ class RawToMZml():
                         scantime,
                         "--filter",
                         "titleMaker <RunId>.<ScanNumber>.<ScanNumber>.<ChargeState> File:\"\"\"^<SourcePath^>\"\"\", NativeID:\"\"\"^<Id^>\"\"\"",
-                        water,
+                        raw_file,
                         ]
                 try:
                     subprocess.run(cmd, shell=False, check=True) # Run a simple command to list files in the current directory
                     os.chdir(MLD) # os path is changed for the log file
-                    log = f'{os.path.basename(water)} converted, time to convert: {int(time.time()-self.begin)} s' 
+                    log = f'{os.path.basename(raw_file)} converted, time to convert: {int(time.time()-self.begin)} s'
                     Log.update(log)
-                    os.chdir(os.path.dirname(self.waters[0]))                
-                    self.adjust(Log, water) # adjust the scan numbers
+                    if self.raw_files:
+                        first_parent = os.path.dirname(self.raw_files[0])
+                        if first_parent:
+                            os.chdir(first_parent)
+                    if self.file_type == 'waters':
+                        self.adjust(Log, raw_file) # adjust the scan numbers
                 except Exception as e:
-                    f'Error to convert file: {water}'
+                    f'Error to convert file: {raw_file}'
                 # TODO: change the msconvert code to be compatible for Wind AND linux!
 
         os.chdir(MLD) # Reset the working directory
