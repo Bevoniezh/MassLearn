@@ -409,7 +409,7 @@ dir_input = html.Div([
 project_name = None
 erase_project = None
 @callback(
-    [Output('raw-dir', 'children'),
+    [Output('format-selection', 'children'),
      Output("project-name-output", "children"),
      Output("project-name-input", "valid"),
      Output("project-name-input", "invalid"),
@@ -525,7 +525,7 @@ def build_vendor_layout():
                         "MassLearn verifies that the selected folder contains at least one file matching the chosen vendor format.",
                         target="raw-dir-input",
                         placement="left"),
-                    html.P(children='\n', id="raw-dir-output"),
+                    html.P(children='', id="raw-dir-output"),
                     html.Br(),
                 ], style={
                         'display': 'flex',
@@ -546,7 +546,7 @@ def build_mzml_layout():
                         'MassLearn verifies that the folder exists and contains at least one .mzML file before continuing.',
                         target="mzml-manual-input",
                         placement="left"),
-                    html.P(children='\n', id='mzml-manual-output'),
+                    html.P(children='', id='mzml-manual-output'),
                     html.Br(),
                 ], style={
                         'display': 'flex',
