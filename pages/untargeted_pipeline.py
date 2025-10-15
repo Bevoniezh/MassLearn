@@ -500,6 +500,32 @@ project_part = html.Div([
                     ])
 
                     
+# Vendor raw file metadata
+###############################################################################
+RAW_FILE_TYPES = {
+    'waters': {
+        'label': 'Waters (.raw folders)',
+        'placeholder': r"C:\\Users\\Arthur\\Waters_raw",
+        'hint': 'Waters .raw folders containing _FUNC001.DAT files',
+    },
+    'thermo': {
+        'label': 'Thermo (.raw files/folders)',
+        'placeholder': r"C:\\Users\\Arthur\\Thermo_raw",
+        'hint': 'Thermo .raw files or folders',
+    },
+    'bruker': {
+        'label': 'Bruker (.d folders)',
+        'placeholder': r"C:\\Users\\Arthur\\Bruker_d",
+        'hint': 'Bruker .d folders',
+    },
+    'sciex': {
+        'label': 'SCIEX (.wiff files)',
+        'placeholder': r"C:\\Users\\Arthur\\Sciex_wiff",
+        'hint': 'SCIEX .wiff files (with associated .scan files if applicable)',
+    },
+}
+DEFAULT_RAW_FILE_TYPE = 'waters'
+
 # 3- Choose data format
 ###############################################################################
 def build_vendor_layout():
@@ -585,6 +611,8 @@ format_selection_part = html.Div([
             ])
 
 
+# 4- Select vendor raw dir
+###############################################################################
 @callback(
     Output('vendor-selection', 'style'),
     Output('mzml-selection', 'style'),
@@ -601,32 +629,6 @@ def update_format_selection(choice):
     else:
         return {'display': 'none', 'width': '100%'}, {'display': 'none', 'width': '100%'}, 'Choose the format that matches your data to unlock the next step.'
 
-
-# 4- Select vendor raw dir
-###############################################################################
-RAW_FILE_TYPES = {
-    'waters': {
-        'label': 'Waters (.raw folders)',
-        'placeholder': r"C:\\Users\\Arthur\\Waters_raw",
-        'hint': 'Waters .raw folders containing _FUNC001.DAT files',
-    },
-    'thermo': {
-        'label': 'Thermo (.raw files/folders)',
-        'placeholder': r"C:\\Users\\Arthur\\Thermo_raw",
-        'hint': 'Thermo .raw files or folders',
-    },
-    'bruker': {
-        'label': 'Bruker (.d folders)',
-        'placeholder': r"C:\\Users\\Arthur\\Bruker_d",
-        'hint': 'Bruker .d folders',
-    },
-    'sciex': {
-        'label': 'SCIEX (.wiff files)',
-        'placeholder': r"C:\\Users\\Arthur\\Sciex_wiff",
-        'hint': 'SCIEX .wiff files (with associated .scan files if applicable)',
-    },
-}
-DEFAULT_RAW_FILE_TYPE = 'waters'
 
 @callback(
     Output('raw-dir-input', 'placeholder'),
