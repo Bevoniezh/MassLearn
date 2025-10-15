@@ -574,7 +574,8 @@ format_selection_part = html.Div([
                     ),
                     html.Div(id='format-selection-message', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
                     html.Br(),
-                    html.Div(id='format-selection-container')
+                    html.Div(build_vendor_layout(), id='vendor-selection', style={'display': 'none', 'width': '100%'}),
+                    html.Div(build_mzml_layout(), id='mzml-selection', style={'display': 'none', 'width': '100%'})
                 ], style={
                         'display': 'flex',
                         'flexDirection': 'column',
@@ -585,19 +586,20 @@ format_selection_part = html.Div([
 
 
 @callback(
-    Output('format-selection-container', 'children'),
+    Output('vendor-selection', 'style'),
+    Output('mzml-selection', 'style'),
     Output('format-selection-message', 'children'),
     Input('raw-data-source', 'value')
 )
-def display_format_selection(choice):
+def update_format_selection(choice):
     if choice == 'vendor':
         guidance = 'Select your vendor format, provide the folder path, and press Enter to continue.'
-        return build_vendor_layout(), guidance
+        return {'display': 'block', 'width': '100%'}, {'display': 'none', 'width': '100%'}, guidance
     elif choice == 'mzml':
         guidance = 'Indicate the folder containing your mzML files, then press Enter to continue.'
-        return build_mzml_layout(), guidance
+        return {'display': 'none', 'width': '100%'}, {'display': 'block', 'width': '100%'}, guidance
     else:
-        return html.Div(), 'Choose the format that matches your data to unlock the next step.'
+        return {'display': 'none', 'width': '100%'}, {'display': 'none', 'width': '100%'}, 'Choose the format that matches your data to unlock the next step.'
 
 
 # 4- Select vendor raw dir
@@ -781,9 +783,7 @@ def validate_mzml_manual_input(n_submit, path_to_check):
 
     raise PreventUpdate()
 
-raw_dir = build_vendor_layout()
-
-# 5- Convert raw files in mzML          
+# 5- Convert raw files in mzML
 ###############################################################################
 @callback(
     [Output('noise-part', 'children'),
