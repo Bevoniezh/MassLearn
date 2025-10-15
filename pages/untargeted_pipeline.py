@@ -409,7 +409,7 @@ dir_input = html.Div([
 project_name = None
 erase_project = None
 @callback(
-    [Output('raw-dir', 'children'),
+    [Output('format-selection', 'children'),
      Output("project-name-output", "children"),
      Output("project-name-input", "valid"),
      Output("project-name-input", "invalid"),
@@ -462,7 +462,7 @@ def validate_project(n_submit, input_project_name):
                         separating_line = create_separating_line(line_count)
                         line_count += 1
                         new_popup = html.Div(children = '', id={"type": "popup", "index": 2}, style={'display': 'none'})
-                        return [separating_line, new_popup, raw_dir], f'{input_project_name}.masslearn created!', True, None, True, 'y'
+                        return [separating_line, new_popup, format_selection_part], f'{input_project_name}.masslearn created!', True, None, True, 'y'
                     else:
                         if erase_project == None:
                             erase_project = True
@@ -475,7 +475,7 @@ def validate_project(n_submit, input_project_name):
                             separating_line = create_separating_line(line_count)
                             line_count += 1
                             new_popup = html.Div(children = '', id={"type": "popup", "index": 2}, style={'display': 'none'})
-                            return [separating_line, new_popup, raw_dir], f'New {input_project_name}.masslearn created!', True, None, True, 'y'
+                            return [separating_line, new_popup, format_selection_part], f'New {input_project_name}.masslearn created!', True, None, True, 'y'
                     
                 else:
                     "", r"No special characters like .?\:; etc , only numbers, letters and _" , None, True, False, 'n'
@@ -496,11 +496,113 @@ project_part = html.Div([
                             'flexDirection': 'column',
                             'alignItems': 'center',      # Center horizontally in the flex container
                         }),
-                html.Div(id = 'raw-dir'),                
-                    ])    
+                html.Div(id = 'format-selection'),
+                    ])
 
                     
-# 3- Select raw dir or continue with mzml files
+# 3- Choose data format
+###############################################################################
+def build_vendor_layout():
+    return html.Div([
+                html.Div([
+                    html.H5('Select your vendor format, point to the folder containing the raw data, and press Enter', style={'textAlign': 'center'}),
+                    dbc.ListGroupItem('WARNING! For Waters data, the conversion procedure removes "_FUNC003" related files (.raw) corresponding to lockspray references. We recommend converting a copy of your raw data rather than the originals.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px', 'padding-right': '5px'}),
+                    html.Br(),
+                    dbc.RadioItems(
+                        id='raw-file-type',
+                        options=[{'label': value['label'], 'value': key} for key, value in RAW_FILE_TYPES.items()],
+                        value=DEFAULT_RAW_FILE_TYPE,
+                        inputClassName='me-2',
+                        labelClassName='d-block',
+                        className='mb-2',
+                        style={'maxWidth': '600px'}
+                    ),
+                    html.Div(id='raw-dir-guidance', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
+                    html.Br(),
+                    dbc.Input(id="raw-dir-input", valid=None, placeholder=r"C:\\Users\\Arthur\\Raw-files", type="text", style={'maxWidth': '600px'}),
+                    html.Br(),
+                    dbc.Tooltip(
+                        "MassLearn verifies that the selected folder contains at least one file matching the chosen vendor format.",
+                        target="raw-dir-input",
+                        placement="left"),
+                    html.P(children='', id="raw-dir-output"),
+                    html.Br(),
+                ], style={
+                        'display': 'flex',
+                        'flexDirection': 'column',
+                        'alignItems': 'center',
+                    }),
+                html.Div(id='convert-raw', children='')
+            ])
+
+
+def build_mzml_layout():
+    return html.Div([
+                html.Div([
+                    html.H5('Indicate the folder containing your mzML files, and press Enter', style={'textAlign': 'center'}),
+                    dbc.Input(id="mzml-manual-input", valid=None, placeholder=r"C:\\Users\\Arthur\\Project\\mzML", type="text", style={'maxWidth': '600px'}),
+                    html.Br(),
+                    dbc.Tooltip(
+                        'MassLearn verifies that the folder exists and contains at least one .mzML file before continuing.',
+                        target="mzml-manual-input",
+                        placement="left"),
+                    html.P(children='', id='mzml-manual-output'),
+                    html.Br(),
+                ], style={
+                        'display': 'flex',
+                        'flexDirection': 'column',
+                        'alignItems': 'center',
+                    }),
+                html.Div(id='mzml-manual-next')
+            ])
+
+
+format_selection_part = html.Div([
+                html.Div([
+                    html.H5('Are your mass spectrometry files vendor-specific or already converted to .mzML?', style={'textAlign': 'center'}),
+                    dbc.RadioItems(
+                        id='raw-data-source',
+                        options=[
+                            {'label': 'Vendor files (Waters, Thermo, Bruker, SCIEX, ...)', 'value': 'vendor'},
+                            {'label': '.mzML files', 'value': 'mzml'}
+                        ],
+                        value=None,
+                        inputClassName='me-2',
+                        labelClassName='d-block',
+                        className='mb-2',
+                        style={'maxWidth': '600px'}
+                    ),
+                    html.Div(id='format-selection-message', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
+                    html.Br(),
+                    html.Div(build_vendor_layout(), id='vendor-selection', style={'display': 'none', 'width': '100%'}),
+                    html.Div(build_mzml_layout(), id='mzml-selection', style={'display': 'none', 'width': '100%'})
+                ], style={
+                        'display': 'flex',
+                        'flexDirection': 'column',
+                        'alignItems': 'center',
+                    }),
+                html.Div(id={"type": "popup", "index": 2})
+            ])
+
+
+@callback(
+    Output('vendor-selection', 'style'),
+    Output('mzml-selection', 'style'),
+    Output('format-selection-message', 'children'),
+    Input('raw-data-source', 'value')
+)
+def update_format_selection(choice):
+    if choice == 'vendor':
+        guidance = 'Select your vendor format, provide the folder path, and press Enter to continue.'
+        return {'display': 'block', 'width': '100%'}, {'display': 'none', 'width': '100%'}, guidance
+    elif choice == 'mzml':
+        guidance = 'Indicate the folder containing your mzML files, then press Enter to continue.'
+        return {'display': 'none', 'width': '100%'}, {'display': 'block', 'width': '100%'}, guidance
+    else:
+        return {'display': 'none', 'width': '100%'}, {'display': 'none', 'width': '100%'}, 'Choose the format that matches your data to unlock the next step.'
+
+
+# 4- Select vendor raw dir
 ###############################################################################
 RAW_FILE_TYPES = {
     'waters': {
@@ -584,33 +686,7 @@ def check_raw_contents(dir_path, file_type = DEFAULT_RAW_FILE_TYPE):
         return any(entry.lower().endswith('.wiff') or entry.lower().endswith('.wiff2') for entry in entries)
     return False
 
-@callback(
-    [Output("mzml-progress", "value"),
-     Output("mzml-progress", "style"),
-     Output("mzml-alternative", "children"),
-     Output("mzml-alternative", "disabled"),
-     Output('mzml-interval-component', 'disabled')],
-    [Input("mzml-alternative", "n_clicks"),
-     Input('mzml-interval-component', 'n_intervals'),
-     State('convert-raw', 'children')],
-     prevent_initial_call = True
-    )
-def loading_buttom_mzml(n_clicks, n, state):
-    ctx = dash.callback_context    
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    if button_id == "mzml-alternative":
-        return 0, {"height": "3px", "width": "300px"}, [dbc.Spinner(size="sm"), " Loading the files..."], True, None
-    elif button_id == "mzml-interval-component":
-        if state == '':
-            global mzml_loading
-            return mzml_loading, dash.no_update, dash.no_update, True, None
-        else:
-            return 100, dash.no_update, ["mzML files loaded."], True, True
-    return dash.no_update, dash.no_update, dash.no_update, dash.no_update, True
-    
-    
 mzml_alternative = None
-mzml_loading = 0
 @callback(
     [Output('convert-raw', 'children'),
      Output("raw-dir-output", "children"),
@@ -619,56 +695,17 @@ mzml_loading = 0
      Output("raw-dir-input", "disabled"),
      Output({'type': 'popup', 'index': 2}, 'children')
      ],
-    [Input("raw-dir-input", "n_submit"),
-     Input("mzml-alternative", "n_clicks")],
+    Input("raw-dir-input", "n_submit"),
     [State("raw-dir-input", "value"),
      State('raw-file-type', 'value')],
     prevent_initial_call = True
 )
-def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
-    global current_project, mzml_alternative, line_count, mzml_loading
-    ctx = dash.callback_context
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    if not ctx.triggered:
-        raise PreventUpdate
-
-    if button_id == 'mzml-alternative':
-        current_project.mzml_files_path = [filename for filename in glob.glob(os.path.join(current_project.mzml_folder_path, '*')) if filename.lower().endswith('.mzml')]
-        mzml_alternative = True
-        # load the files Mass Spectra
-        for count, file in enumerate(current_project.mzml_files_path):
-            rawfile_path_noext, _ = os.path.splitext(file)
-            sample_name = os.path.basename(rawfile_path_noext)
-            current_project.sample_names.append(sample_name)
-            spectra = cleaning.Spectra(file) # take all the spectra data
-            spectra.extract_peaks(0, 0) # extract the MSs from the file, 0 are Noise background threshold. Because hte fiels have already been cut, this information is only for the function consistency
-            pk1 = spectra.peakarray1 # peakarray is the array containg all spectral info
-            rt1 = spectra.rt1
-            pk2 = spectra.peakarray2 # MS level 2
-            rt2  = spectra.rt2
-
-            ms1_spectra = {}
-            for rt, pk in zip(rt1, pk1):
-                mask = ~(np.all(pk == 0, axis=1))
-                ms1_spectra[rt] = pk[mask]
-            ms2_spectra = {}
-            for rt, pk in zip(rt2, pk2):
-                mask = ~(np.all(pk == 0, axis=1))
-                ms2_spectra[rt] = pk[mask]
-            current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra
-            mzml_loading = int(((count + 1) / len(current_project.mzml_files_path)) *100) # charge the value for progress bar
-        cache.set('project_loaded', current_project)
-        current_project.save()
-        separating_line = create_separating_line(line_count)
-        line_count += 1
-        new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
-        return [separating_line, new_popup, template_part], "Put your mzml files in the /mzML folder of your project.", None, None, True, 'y'
-    
+def validate_raw_input(n_submit, path_to_check, file_type):
+    global current_project, mzml_alternative, line_count
     if n_submit:
         path_to_check = normalize_path(path_to_check)
         file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
         info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
-        # Add your validation logic here
         if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
             Log = cache.get('log')
             Log.update(f'Raw files path: {path_to_check} added.')
@@ -687,44 +724,66 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
 
     raise PreventUpdate()
 
-raw_dir = html.Div([
-            html.Div([
-                html.H5('Select your vendor format, point to the folder containing the raw data, and press Enter', style={'textAlign': 'center'}),
-                dbc.ListGroupItem('WARNING! For Waters data, the conversion procedure removes "_FUNC003" related files (.raw) corresponding to lockspray references. We recommend converting a copy of your raw data rather than the originals.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
-                html.Br(),
-                dbc.RadioItems(
-                    id='raw-file-type',
-                    options=[{'label': value['label'], 'value': key} for key, value in RAW_FILE_TYPES.items()],
-                    value=DEFAULT_RAW_FILE_TYPE,
-                    inputClassName='me-2',
-                    labelClassName='d-block',
-                    className='mb-2',
-                    style={'maxWidth': '600px'}
-                ),
-                html.Div(id='raw-dir-guidance', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
-                html.Br(),
-                dbc.Input(id="raw-dir-input", valid = None, placeholder=r"C:\Users\Arthur\Raw-files", type="text", style={'maxWidth': '600px'}),
-                html.Br(),
-                dcc.Interval(id='mzml-interval-component', interval=500, n_intervals=0, max_intervals=-1, disabled = True),  # Checks every second
-                dbc.Button('My files are already .mzML', id = "mzml-alternative", color="primary", n_clicks=0, style={"width": "300px"}),
-                dbc.Progress(id="mzml-progress", color="success", style={'display':'none'}, className='mt-1'),
-                html.Br(),
-                dbc.Tooltip(
-                    "MassLearn verifies that the selected folder contains at least one file matching the chosen vendor format.",
-                    target="raw-dir-input",  # ID of the component to which the tooltip is attached
-                    placement="left"),
-                html.P(children = '\n', id="raw-dir-output"),
-                html.Br(),
-                ], style={
-                        'display': 'flex',
-                        'flexDirection': 'column',
-                        'alignItems': 'center',      # Center horizontally in the flex container
-                    }),
-            html.Div(id = 'convert-raw', children = '')
-                ])
-                    
-                    
-# 4- Convert raw files in mzML          
+
+@callback(
+    [Output('mzml-manual-next', 'children'),
+     Output('mzml-manual-output', 'children'),
+     Output('mzml-manual-input', 'valid'),
+     Output('mzml-manual-input', 'invalid'),
+     Output('mzml-manual-input', 'disabled'),
+     Output({'type': 'popup', 'index': 2}, 'children')],
+    Input('mzml-manual-input', 'n_submit'),
+    State('mzml-manual-input', 'value'),
+    prevent_initial_call=True
+)
+def validate_mzml_manual_input(n_submit, path_to_check):
+    global current_project, mzml_alternative, line_count
+    if n_submit:
+        path_to_check = normalize_path(path_to_check)
+        if os.path.exists(path_to_check) and os.path.isdir(path_to_check):
+            mzml_files = sorted([filename for filename in glob.glob(os.path.join(path_to_check, '*')) if filename.lower().endswith('.mzml')])
+            if mzml_files:
+                mzml_alternative = True
+                current_project.mzml_folder_path = path_to_check
+                current_project.mzml_files_path = mzml_files
+                current_project.sample_names = []
+                current_project.files_spectra = {}
+                for file in current_project.mzml_files_path:
+                    rawfile_path_noext, _ = os.path.splitext(file)
+                    sample_name = os.path.basename(rawfile_path_noext)
+                    current_project.sample_names.append(sample_name)
+                    spectra = cleaning.Spectra(file)
+                    spectra.extract_peaks(0, 0)
+                    pk1 = spectra.peakarray1
+                    rt1 = spectra.rt1
+                    pk2 = spectra.peakarray2
+                    rt2 = spectra.rt2
+
+                    ms1_spectra = {}
+                    for rt, pk in zip(rt1, pk1):
+                        mask = ~(np.all(pk == 0, axis=1))
+                        ms1_spectra[rt] = pk[mask]
+                    ms2_spectra = {}
+                    for rt, pk in zip(rt2, pk2):
+                        mask = ~(np.all(pk == 0, axis=1))
+                        ms2_spectra[rt] = pk[mask]
+                    current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra
+
+                cache.set('project_loaded', current_project)
+                current_project.save()
+                separating_line = create_separating_line(line_count)
+                line_count += 1
+                new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
+                message = f"{len(current_project.mzml_files_path)} mzML file(s) loaded."
+                return [separating_line, new_popup, template_part], message, True, None, True, 'y'
+            else:
+                return "", "No .mzML files found in this folder.", None, True, False, 'n'
+        else:
+            return "", "Not a valid path, make sure the folder exists and is accessible.", None, True, False, 'n'
+
+    raise PreventUpdate()
+
+# 5- Convert raw files in mzML
 ###############################################################################
 @callback(
     [Output('noise-part', 'children'),
@@ -843,7 +902,7 @@ convert_raw = html.Div([
                     html.Div(id = 'noise-part'),
                 ])
                           
-# 5- Define Noise threshold      
+# 6- Define Noise threshold
 ###############################################################################
 @callback(
     [Output('ms-noise', 'children'),
@@ -914,7 +973,7 @@ noise_threshold = html.Div([
                     html.Div(id = 'ms-noise')
                     ])
                         
-# 6- Define MS1 and MS2 basic noise cut off    
+# 7- Define MS1 and MS2 basic noise cut off
 ###############################################################################
 @callback(
     [Output('conversion-progress-part', 'children'),
@@ -995,7 +1054,7 @@ ms_noise = html.Div([
                     html.Div(id = 'conversion-progress-part')
                 ])
                         
-# 7- Conversion, denoising and progress bar
+# 8- Conversion, denoising and progress bar
 ###############################################################################
 # Global variable to track progress
 global_progress = 0                    
@@ -1150,7 +1209,7 @@ progress = html.Div([
                     html.Div(id = 'template-part')
                     ])
 
-# 8- Load sample template
+# 9- Load sample template
 ###############################################################################
 template_dict = {}
 tables_list = []
@@ -1349,7 +1408,7 @@ template_part = html.Div([
                 html.Div(id = 'mzmine-part'),                
                 ])          
                         
-# 8- MZmine settings
+# 10- MZmine settings
 ###############################################################################  
 # Global variables to track the threads for mzmine process
 mzmine_path = cache.get('MZmine.exe')              
@@ -1585,7 +1644,7 @@ mzmine_settings = html.Div([
                     html.Div(id = 'execution-part'),  
                     ])
 
-# 9- Mzmine execution
+# 11- Mzmine execution
 ###############################################################################
 mzmine_process_start = False
 template_to_proceed = []
