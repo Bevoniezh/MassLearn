@@ -9,7 +9,8 @@ import json
 import configparser
 from pathlib import Path
 import dash
-import threading, time, os
+import threading
+import time
 from dash import html, dcc, callback
 from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
