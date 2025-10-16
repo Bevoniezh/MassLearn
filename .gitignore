@@ -20,6 +20,9 @@ venv/
 # Disk cache
 /disk_cache
 
+# Files
+log-backup
+
 # File types
 *.mzML
 *.h5
