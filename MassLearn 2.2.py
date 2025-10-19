@@ -57,10 +57,11 @@ app.clientside_callback(
     Output('scroll-trigger', 'children'),
     [Input('project-name-input', 'valid')]
 )     
-app.clientside_callback(    
+app.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='scrollToBottom'),
     Output('scroll-trigger2', 'children'),
-    Input('raw-dir-input', 'valid')
+    [Input('raw-dir-input', 'valid'),
+     Input('mzml-manual-input', 'valid')]
 )     
 app.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='scrollToBottom'),
@@ -69,7 +70,7 @@ app.clientside_callback(
 )
 app.clientside_callback(
     ClientsideFunction(namespace='clientside', function_name='scrollToBottom'),
-    Output('scroll-trigge4', 'children'),
+    Output('scroll-trigger4', 'children'),
     Input("noise-trace-button", "n_clicks")
 )    
 app.clientside_callback(

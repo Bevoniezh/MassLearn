@@ -65,32 +65,35 @@ else:
 navbar = dbc.Navbar(
     dbc.Container([
             html.A(
-                # Use row and col to control vertical alignment of logo / brand
-                dbc.Row([
-                        dbc.Col(html.Img(src='/assets/logo.png', height='40px')),
-                        dbc.Col(dbc.NavbarBrand("Analytical dashboard", className="ms-1")),
-                    ],
-                    align="center",
-                    className="g-0",
+            dbc.Row([
+                dbc.Col(html.Img(src='/assets/logo.png', height="40px")),
+                dbc.Col(
+                    dbc.NavbarBrand("<- -        Main Menu", className="ms-2",
+                                    style={"fontSize": "16px"})  # smaller font
                 ),
-                href="/home",
-                style={"textDecoration": "none"},
+            ],
+            align="center",
+            className="g-0",
             ),
+            href="/home",
+            style={"textDecoration": "none"},
+        ),
+             dbc.Col(
+            "Analytical Dashboard",
+            width="auto",
+            className="d-flex justify-content-center",
+            style={"fontSize": "20px", "fontWeight": "bold"}  # bigger font
+             ),
             dbc.Col(
                 Project_menu,
                 width="auto",
-                className="d-flex justify-content-center",  # Center the dropdown
+                className="d-flex justify-content-right", 
             ),
-            dbc.Switch(
-                    label="Activate Q&A",
-                   value=False,
-                   disabled = True,
-                   id="untargeted-pipeline-switches-QA"),
-                ]),
+    ]),
     color="dark",
     dark=True,
-    style={'height': '50px'},)
-
+    style={'height': '50px'},
+)
 
 
 # Define functions

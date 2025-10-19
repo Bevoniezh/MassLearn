@@ -25,6 +25,7 @@ venv/
 
 # Files
 log-backup
+users.json
 
 # File types
 *.mzML

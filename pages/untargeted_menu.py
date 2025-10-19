@@ -25,31 +25,31 @@ project_loaded = cache.get('project_loaded')
 
 navbar = dbc.Navbar(
     dbc.Container([
-            html.A(
-                # Use row and col to control vertical alignment of logo / brand
-                dbc.Row([
-                        dbc.Col(html.Img(src='/assets/logo.png', height="40px")),
-                        dbc.Col(dbc.NavbarBrand("Untargeted MS pipeline menu", className="ms-2")),
-                    ],
-                    align="center",
-                    className="g-0",
+        html.A(
+            dbc.Row([
+                dbc.Col(html.Img(src='/assets/logo.png', height="40px")),
+                dbc.Col(
+                    dbc.NavbarBrand("<- -        Main Menu", className="ms-2",
+                                    style={"fontSize": "16px"})  # smaller font
                 ),
-                href="/home",
-                style={"textDecoration": "none"},
+            ],
+            align="center",
+            className="g-0",
             ),
-            dbc.Col(
-                html.P(), # place to potentially put a main project name display
-            ),
-            dbc.Switch(
-                    label="Activate Q&A",
-                   value=False,
-                   disabled = True,
-                   id="untargeted-pipeline-switches-QA"),
-                ]),
+            href="/home",
+            style={"textDecoration": "none"},
+        ),
+        dbc.Col(
+            "Untargeted MS pipeline menu",
+            width="auto",
+            className="d-flex justify-content-center",
+            style={"fontSize": "20px", "fontWeight": "bold"}  # bigger font
+        ),
+    ]),
     color="dark",
     dark=True,
-    style={'height': '50px'},)
-
+    style={'height': '50px'},
+)
 
 
 button_style = {

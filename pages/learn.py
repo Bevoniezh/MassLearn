@@ -158,34 +158,33 @@ def _update_session_score(user, session_id, correct, total):
             _save_users_file(data)
             return
 
-
-dash.register_page(__name__)
-
 navbar = dbc.Navbar(
     dbc.Container([
-            html.A(
-                # Use row and col to control vertical alignment of logo / brand
-                dbc.Row([
-                        dbc.Col(html.Img(src='/assets/logo.png', height="40px")),
-                        dbc.Col(dbc.NavbarBrand("<- -        Learn", className="ms-2")),
-                    ],
-                    align="center",
-                    className="g-0",
+        html.A(
+            dbc.Row([
+                dbc.Col(html.Img(src='/assets/logo.png', height="40px")),
+                dbc.Col(
+                    dbc.NavbarBrand("<- -        Main Menu", className="ms-2",
+                                    style={"fontSize": "16px"})  # smaller font
                 ),
-                href="/home",
-                style={"textDecoration": "none"},
+            ],
+            align="center",
+            className="g-0",
             ),
-            
-            dbc.Switch(
-                    label="Activate Q&A",
-                   value=True,
-                   disabled = True),
-                ]),
+            href="/home",
+            style={"textDecoration": "none"},
+        ),
+        dbc.Col(
+            "Learn",
+            width="auto",
+            className="d-flex justify-content-center",
+            style={"fontSize": "20px", "fontWeight": "bold"}  # bigger font
+        ),
+    ]),
     color="dark",
     dark=True,
-    style={'height': '50px'},)
-
-
+    style={'height': '50px'},
+)
 
 
 # Definition of pop up Q&A
