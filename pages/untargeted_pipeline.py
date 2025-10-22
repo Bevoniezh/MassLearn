@@ -16,6 +16,7 @@ import random
 import scipy
 import shutil
 import threading
+import logging
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -29,6 +30,7 @@ import Modules.grouping_tool as gt
 import Modules.cleaning as cleaning
 import Modules.features as features
 import Modules.file_manager as fmanager
+from Modules import logging_config
 import dash_bootstrap_components as dbc
 from dash.dependencies import MATCH, ALL
 from dash.exceptions import PreventUpdate
@@ -39,6 +41,8 @@ from dash import html, dcc, dash_table, callback_context, callback
 cache = Cache('./disk_cache')
 
 dash.register_page(__name__)
+
+logger = logging.getLogger(__name__)
 
 print(f'project cache up: {cache.get("project")}')
 
@@ -82,9 +86,7 @@ def get_layout():
     button_status2 = None
     feature_id = 0
     if cache.get('identity') is not None:
-        Log = cache.get('log')
-        log = 'Creation of a new project.'
-        added_log = Log.update(log)
+        logging_config.log_info(logger, 'Creation of a new project.')
         return main_layout
     else:
         return dcc.Link('Go to login', href='/login')
@@ -360,10 +362,8 @@ def validate_dir(n_submit, path_to_check):
         path_to_check = normalize_path(path_to_check)
         # Add your validation logic here
         if os.path.exists(path_to_check) and os.path.isdir(path_to_check):
-            cache.set('project_path', path_to_check)   
-            Log = cache.get('log')  
-            Log.update(f'{path_to_check} added for new project')
-            cache.set('log', Log)
+            cache.set('project_path', path_to_check)
+            logging_config.log_info(logger, '%s added for new project', path_to_check)
             new_popup = html.Div(children = '', id={"type": "popup", "index": 1}, style={'display': 'none'})
             separating_line = create_separating_line(line_count)
             line_count += 1
@@ -429,10 +429,7 @@ def validate_project(n_submit, input_project_name):
                 valid = fmanager.FileManager(input_project_name, pathfolder, 'data', 'txt') # 'data' and 'txt' are just mock information because we wont save those information yet
                 test = valid.is_valid_filename(input_project_name) # check for special character presence
                 if test == True:
-                    log = f'New project name: {input_project_name}'
-                    Log = cache.get('log')
-                    Log.update(log)
-                    cache.set('log', Log)
+                    logging_config.log_info(logger, 'New project name: %s', input_project_name)
                     project = fmanager.Project(input_project_name, pathfolder, Newproject = True) # create new project
                     project_file = fmanager.FileManager(input_project_name, pathfolder, project, 'masslearn')
                     subfolder_mzml = os.path.join(pathfolder, 'mzML') # verify if there is a subfolder for denoised file
@@ -455,8 +452,7 @@ def validate_project(n_submit, input_project_name):
                         os.makedirs(subfolder_plot)
                     project.plotpath = subfolder_plot 
                     if project_file.handle_existing_file_dash():
-                        Log = project_file.saving_file_dash(Log, Project = project)
-                        cache.set('log', Log)
+                        project_file.saving_file_dash(project=project)
                         current_project = project
                         cache.set('project_loaded', current_project)
                         separating_line = create_separating_line(line_count)
@@ -468,8 +464,7 @@ def validate_project(n_submit, input_project_name):
                             erase_project = True
                             return "", "This project name already exists. Press Enter again to erase it and create a new one." , None, True, False, 'n'
                         elif erase_project:
-                            Log = project_file.saving_file_dash(Log, Project = project)
-                            cache.set('log', Log)
+                            project_file.saving_file_dash(project=project)
                             current_project = project
                             cache.set('project_loaded', current_project)
                             separating_line = create_separating_line(line_count)
@@ -756,13 +751,11 @@ raw_dir = html.Div([
 def convert_raw_input(n_clicks, value):
     global current_project, line_count
     if n_clicks:
-        cache.set('raw_range', value)  
+        cache.set('raw_range', value)
         current_project.rt_range = value
         cache.set('project_loaded', current_project)
-        
-        Log = cache.get('log')  
-        Log.update(f'Min rt: {value[0]} and max rt: {value[1]}.')
-        cache.set('log', Log)
+
+        logging_config.log_info(logger, 'Min rt: %s and max rt: %s.', value[0], value[1])
         separating_line = create_separating_line(line_count)
         line_count += 1
         new_popup = html.Div(children = '', id={"type": "popup", "index": 4}, style={'display': 'none'})
@@ -878,10 +871,8 @@ def validate_noise_raw_input(n_clicks, threshold):
         if 0 < threshold < 101:
             current_project.noise_trace_threshold = threshold
             cache.set('project_loaded', current_project)
-            
-            Log = cache.get('log')  
-            Log.update(f'Noise trace threshold: {threshold}')
-            cache.set('log', Log)
+
+            logging_config.log_info(logger, 'Noise trace threshold: %s', threshold)
             separating_line = create_separating_line(line_count)
             line_count += 1
             new_popup = html.Div(children = '', id={"type": "popup", "index": 5}, style={'display': 'none'})
@@ -951,9 +942,12 @@ def validate_ms_noise_input(n_clicks, ms1, ms2):
             current_project.ms1_noise = ms1
             current_project.ms2_noise = ms2
             cache.set('project_loaded', current_project)
-            Log = cache.get('log')  
-            Log.update(f'ms1 noise threshold: {ms1} and ms2 noise threshold: {ms2}')
-            cache.set('log', Log)
+            logging_config.log_info(
+                logger,
+                'ms1 noise threshold: %s and ms2 noise threshold: %s',
+                ms1,
+                ms2,
+            )
             
             threading.Thread(target=process_files, args=(current_project.raw_files_path,)).start()
             separating_line = create_separating_line(line_count)
@@ -1032,10 +1026,9 @@ def process_files(files):
     global sample_names
     global failure
     
-    Log = cache.get('log') 
-    total_files = len(current_project.raw_files_path) 
+    total_files = len(current_project.raw_files_path)
     soft = cm.Software_DashApp()
-    Proteowizard_path = soft.path['ProteoWizard'] 
+    Proteowizard_path = soft.path['ProteoWizard']
     
     start_time = time.time()
     file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
@@ -1052,19 +1045,21 @@ def process_files(files):
             current_project.sample_names.append(sample_name)
             # Convert the file
             raw_to_convert = convert.RawToMZml([rawfile_path], current_project.rt_range[0], current_project.rt_range[1], file_type)
-            raw_to_convert.convert_file(Log, Proteowizard_path ) # convert AND adjust scans of the file
-            size_in_bytes = os.path.getsize(rawfolder_mzmlfile_path)            
+            raw_to_convert.convert_file(Proteowizard_path)
+            size_in_bytes = os.path.getsize(rawfolder_mzmlfile_path)
             size_in_kb = size_in_bytes / 1024 # Convert the size from bytes to kilobytes (1 KB = 1024 bytes)
             if size_in_kb < 300: # below 300kB it is not a satisfying mzml file
-                Log = cache.get('log')  
-                Log.update(f'{sample_name} too small, removed from the file list.')
-                cache.set('log', Log)
+                logging_config.log_warning(logger, '%s too small, removed from the file list.', sample_name)
             else:
                 # Denoise the file
                 spectra = cleaning.Spectra(rawfolder_mzmlfile_path) # take all the spectra data
                 spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise) # peak variable is only here to allow loading bar to not be disturbe
-                to_denoise_file = cleaning.Denoise(rawfolder_mzmlfile_path, Log, current_project.featurepath)
-                denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(Log, spectra, current_project.noise_trace_threshold, Dash_app = True) # denoised_spectra is the spectra class object from cleaning module, containing lots of attributes. Encoded are just variables with basice array denoised
+                to_denoise_file = cleaning.Denoise(rawfolder_mzmlfile_path, current_project.featurepath)
+                denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
+                    spectra,
+                    current_project.noise_trace_threshold,
+                    Dash_app=True,
+                ) # denoised_spectra is the spectra class object from cleaning module, containing lots of attributes. Encoded are just variables with basice array denoised
                 current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra ##### Important: here you find the spectra files, use it to plot the features
                 # Move and delete the files
                 if os.path.exists(mzmlfolder_mzmlfile_path):
@@ -1074,19 +1069,15 @@ def process_files(files):
                     shutil.move(rawfolder_mzmlfile_path, current_project.mzml_folder_path)
                 if os.path.exists(rawfolder_mzmlfile_path):
                     os.remove(rawfolder_mzmlfile_path)
-                    
-                Log = cache.get('log')  
-                Log.update(f'{sample_name} converted and denoised.')
-                cache.set('log', Log)
+
+                logging_config.log_info(logger, '%s converted and denoised.', sample_name)
         except Exception:
             rawfile_path = file
             rawfile_path_noext, _ = os.path.splitext(file)
             sample_name = os.path.basename(rawfile_path_noext)
-            Log = cache.get('log')  
-            Log.update(f'{sample_name} conversion failure.')
+            logging_config.log_error(logger, '%s conversion failure.', sample_name)
             print(f'{sample_name} conversion failure.')
-            cache.set('log', Log)
-            
+
             failure.append(sample_name)
 
         global_progress = int(((nb + 1) / (total_files)) * 100)
@@ -1650,8 +1641,7 @@ def update_process_status(n_clicks_deblank, n, n_clicks):
         fl_msn_path = current_project.featurelist[exp_title_to_proceed]
         batch_path = current_project.batch[exp_title_to_proceed]
         mzmine_instance = features.MZmine(batch_path, fl_msn_path) # run mzmine for ms1
-        Log = cache.get('log')
-        process_thread = mzmine_instance.start_run(Log)  # Assuming 'Log' is defined
+        process_thread = mzmine_instance.start_run()
         return [dbc.Spinner(color="success", type="grow", spinner_style={'marginBottom': '30px'}), html.P(exp_title_to_proceed + progress_template)], None, True
     
     elif process_thread is not None :
