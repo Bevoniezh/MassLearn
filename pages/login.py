@@ -6,14 +6,16 @@ MassLearn Login Page
 
 import os
 import json
+import logging
 import configparser
 from pathlib import Path
 import dash
-import threading, time, os
+import threading, time
 from dash import html, dcc, callback
 from dash.dependencies import Input, Output, State
 import dash_bootstrap_components as dbc
 from diskcache import Cache
+from Modules import logging_config
 
 # -------------------------------------------------------------------
 # Directories
@@ -110,6 +112,8 @@ def _get_dropdown_items():
 # DiskCache for runtime
 cache = Cache("./disk_cache")
 dash.register_page(__name__)
+
+logger = logging.getLogger(__name__)
 
 # -------------------------------------------------------------------
 # Helpers
@@ -362,13 +366,10 @@ def validate_selection(value):
         message, ok = check_software()
         if ok:
             update_config("General", "last_user", value)
-            log = f'Selected user: {value}'
-            Log = cache.get('log')
             cache.set('identity', value)
             cache.set('current_learn_session', None)
-            Log.user = value
-            Log.update(log)
-            cache.set('log', Log)
+            logging_config.set_user(value)
+            logging_config.log_info(logger, "Selected user: %s", value)
             return dbc.Button("Enter MassLearn", color="primary", href='/home')
         else:
             return dbc.ListGroupItem(f"Please define missing software path by cliking on the icons below, then restart MassLearn.\n\nThe missing softwares are:{' - '.join(message)}", 

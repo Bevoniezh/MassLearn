@@ -7,16 +7,20 @@ Created on Tue Mar 21 13:19:46 2023
 import os
 import re
 import time
+import logging
 import subprocess
 import Modules.CLI_text as cli
 from Modules.file_manager import MassLearn_directory as MLD
+from Modules import logging_config
+
+logger = logging.getLogger(__name__)
 
 class RawToMZml():
     """
     Class to convert proprietary vendor files to mzML files using ProteoWizard.
     Have to be used as follow:
         raw_to_convert = convert.RawToMZml(abs/rel_path, min_elution_time, max_elution_time, file_type)
-        raw_to_convert.convert_file(Log, MsconvertPath) # convert AND adjust scans of the file when required
+        raw_to_convert.convert_file(MsconvertPath) # convert AND adjust scans of the file when required
     """
     def __init__(self, Raw_files_list, Mini = 50, Maxi = 360, File_type = 'waters'):
         self.mini = str(Mini) # minimum elution time (default 50 sec)
@@ -26,7 +30,7 @@ class RawToMZml():
         self.begin = time.time()
         
     # Function to adjust the scan number and put them in ascending order, have to be used afer convert_file()
-    def adjust(self, Log, File): # do both tasks to avoid opening the File two times (it can be almost 20 s to open)
+    def adjust(self, File): # do both tasks to avoid opening the File two times (it can be almost 20 s to open)
         file, _ = os.path.splitext(File)
         mzml = file + '.mzML'
         with open(mzml, 'r') as f:
@@ -56,7 +60,7 @@ class RawToMZml():
 
 
     # This funciton use msconvert to generate mzML files, but the ouput files are not correct concerning the scan numbers, you need after to use cuntion adjust()
-    def convert_file(self, Log, MSconvert_path):
+    def convert_file(self, MSconvert_path):
         # 1- Delete all func3 (meaning the lockspray signal) from raw files:        
         prefix = "_FUNC003" # Define the prefix to look for in file names
         if self.file_type == 'waters':
@@ -91,13 +95,13 @@ class RawToMZml():
                     subprocess.run(cmd, shell=False, check=True) # Run a simple command to list files in the current directory
                     os.chdir(MLD) # os path is changed for the log file
                     log = f'{os.path.basename(raw_file)} converted, time to convert: {int(time.time()-self.begin)} s'
-                    Log.update(log)
+                    logging_config.log_info(logger, log)
                     if self.raw_files:
                         first_parent = os.path.dirname(self.raw_files[0])
                         if first_parent:
                             os.chdir(first_parent)
                     if self.file_type == 'waters':
-                        self.adjust(Log, raw_file) # adjust the scan numbers
+                        self.adjust(raw_file) # adjust the scan numbers
                 except Exception as e:
                     f'Error to convert file: {raw_file}'
                 # TODO: change the msconvert code to be compatible for Wind AND linux!

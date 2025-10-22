@@ -11,15 +11,18 @@ import os
 import math
 import scipy
 import base64
+import logging
 import pymzml
 import peakutils
 import numpy as np
 import pandas as pd
 import time as time
-import Modules.cache_manager as cache
 import matplotlib.pyplot as plt
 from scipy.signal import savgol_filter, peak_widths
 from functools import partial
+from Modules import logging_config
+
+logger = logging.getLogger(__name__)
 
 
 class Denoise(): 
@@ -44,14 +47,14 @@ class Denoise():
         Spectra.extract_peaks(Noise1, Noise2)
         
         After, denoise:
-        to_denoise_file = Denoise(Filename, Log)
-        to_denoise_file.filtering(Log, Spectra, threshold)
+        to_denoise_file = Denoise(Filename, Featurepath)
+        to_denoise_file.filtering(Spectra, threshold)
         
     """
-    def __init__(self, Filename, Log, Featurepath): # Filenames have to be in relative or absolute path not only the files name
-        self.filename = Filename  
+    def __init__(self, Filename, Featurepath): # Filenames have to be in relative or absolute path not only the files name
+        self.filename = Filename
         self.featurepath = Featurepath
-        self.path = Filename 
+        self.path = Filename
         self.begin = time.time()
         self.binary_count = 0 # attribute for self.filtering() method
         self.encoded_count = 0 # attribute for self.filtering() method
@@ -78,7 +81,7 @@ class Denoise():
         self.scanlist[0] = re.sub('</dataProcessing>', processing_method + '\n</dataProcessing>', self.scanlist[0])
         
         log = f'{os.path.basename(self.filename)} open.'
-        Log.update(log)
+        logging_config.log_info(logger, log)
 
     # Function to encode in binary format the string based m/z and intensities values        
     def encode_binary(self, Peakarray_masked):
@@ -98,7 +101,7 @@ class Denoise():
         return encoded_data #list of tuples containing masses and intensities
     
     # Function to fliter the noise and re-werite mzml files    
-    def filtering(self, Log, Spectra, Threshold_scans = 20, Dash_app = False):
+    def filtering(self, Spectra, Threshold_scans = 20, Dash_app = False):
         spectra = Spectra # it is the Spectra() object
         
         res1, dft1 = spectra.noise_trace(spectra.peaks1, spectra.peakarray1, Threshold = Threshold_scans) # take noise trace information        
@@ -113,9 +116,9 @@ class Denoise():
         noise_list_ms1 ="\n".join(rounded_values_dft1)
         noise_list_ms2 ="\n".join(rounded_values_dft2)
         log = f'MS1 noise trace for file {os.path.basename(self.filename)} are:\n{noise_list_ms1}'
-        Log.update(log)
+        logging_config.log_info(logger, log)
         log2 = f'MS2 noise trace for file {os.path.basename(self.filename)} are:\n{noise_list_ms2}'
-        Log.update(log2)
+        logging_config.log_info(logger, log2)
         with open(os.path.join(self.featurepath, 'noise', os.path.splitext(os.path.basename(self.filename))[0] + '.txt'), 'w') as fic:
                   fic.write(f'{log}\n\n{log2}')
         
@@ -157,7 +160,7 @@ class Denoise():
         with open(self.filename[:-5] +'.mzML', 'w') as file: # Save the modified XML file
             file.write(self.file) 
         log = f'Time required to remove noise from {os.path.basename(self.filename)}: {int(time.time()-self.begin)} s'
-        Log.update(log)
+        logging_config.log_info(logger, log)
         
         # Make the two dictionnaries to store the rt and corresponding spectra info
         ms1_spectra = {}
