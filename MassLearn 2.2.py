@@ -123,7 +123,7 @@ app.clientside_callback(
 
 
 # Pages and cache definition
-from pages import login, home, analytics, untargeted_menu, untargeted_pipeline, learn
+from pages import login, home, analytics, untargeted_pipeline, untargeted_menu, learn
 
 
 #cache.set('software', softwares)          

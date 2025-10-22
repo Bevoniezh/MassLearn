@@ -679,7 +679,7 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
         file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
         info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
         # Add your validation logic here
-        if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
+        if os.path.exists(path_to_check) and check_raw_contents(path_to_check, file_type):
             Log = cache.get('log')
             Log.update(f'Raw files path: {path_to_check} added.')
             cache.set('log', Log)
