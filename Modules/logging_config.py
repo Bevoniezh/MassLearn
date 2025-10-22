@@ -102,6 +102,12 @@ def configure_logging(force: bool = False) -> None:
     user_handler.addFilter(_user_filter)
     root_logger.addHandler(user_handler)
 
+    for noisy_logger in ("werkzeug", "werkzeug.serving"):
+        logger = logging.getLogger(noisy_logger)
+        logger.handlers.clear()
+        logger.propagate = False
+        logger.disabled = True
+
     _configured = True
 
 
@@ -187,4 +193,3 @@ def log_error(
 ) -> None:
     """Log an error message and update the optional project log."""
     _log(logger, logging.ERROR, message, args, project=project, extra=extra)
-
