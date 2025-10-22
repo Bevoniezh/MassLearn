@@ -11,12 +11,15 @@ import psutil
 import shutil
 import threading
 import subprocess
+import logging
 import pandas as pd
 from lxml import etree
 from xml.etree.ElementTree import tostring
 import Modules.file_manager as fmanager
-import Modules.cache_manager as cache
 import Modules.CLI_text as cli
+from Modules import logging_config
+
+logger = logging.getLogger(__name__)
 
 
 class Batch():
@@ -53,7 +56,7 @@ class Batch():
         
         
     # Function to create a batch from the parameters defined in parameters.ods and taking as reference batch batch_default.xml in the cache folder
-    def create_batch(self, Log, Newfilename = '', Folder = '', Dash = False): #TODO all created batch in a project can be saved in the project file
+    def create_batch(self, Newfilename = '', Folder = '', Dash = False): #TODO all created batch in a project can be saved in the project file
         self.tree = etree.parse(self.batchdefault, self.parser)
         self.root = self.tree.getroot()    
         ods = self.parameters
@@ -70,9 +73,9 @@ class Batch():
             self.proceed_module(batchstep, row_list, batchstep_rows)
         obj = fmanager.FileManager(Newfilename, Folder, self.tree, 'xml')
         if Dash == False:
-            path = obj.saving_file(Log, False)  
+            path = obj.saving_file(handle=False)
         else:
-            path = obj.saving_file_dash(Log, False)  
+            path = obj.saving_file_dash()
         with open(path, encoding='UTF-8') as f: # Open the file in read mode
             lines = f.readlines()
         lines[0] = '<?xml version="1.0" encoding="UTF-8"?><batch mzmine_version="3.4.16">\n' # Replace the first line with the new line
@@ -155,13 +158,13 @@ class MZmine():
         self.MassLearn_directory = os.getcwd()
         self.message = ''
     
-    def start_run(self, Log):
+    def start_run(self):
         # This method starts the run method in a new thread
-        thread = threading.Thread(target=self.run_dashmode, args=(Log,))
+        thread = threading.Thread(target=self.run_dashmode)
         thread.start()
         return thread # Return the thread object so you can check if it's still running
-        
-    def run(self, Log): #TODO  - linux adaptation
+
+    def run(self): #TODO  - linux adaptation
         self.delete_files_in_folder(self.temp)
         with open('./Cache/software_path.dat', 'r+') as fic:
             file = fic.readlines()
@@ -172,21 +175,21 @@ class MZmine():
             f'{mzmine_exe}\MZmine.exe',
             "-batch",
             f'{self.batchpath}',
-            "-memory", "none",             
+            "-memory", "none",
             "-temp",
             f'{self.temp}',
             ]
         log = f'Begin of MZmine run for {os.path.basename(self.batchpath)}. No estimation of time to the end, be patient it will not take too long, just some few minutes.'
-        Log.update(log)
+        logging_config.log_info(logger, log)
         text = cli.DisplayText(log)
         print(text.simple())
         subprocess.run(cmd, shell=True, capture_output=True, text=True) # Run a simple command to list files in the current directory
         log = f'Feature list {os.path.basename(self.fln)} created.'
-        Log.update(log)
+        logging_config.log_info(logger, log)
         text = cli.DisplayText(log)
         print(text.simple())
-        
-    def run_dashmode(self, Log): #TODO  - linux adaptation
+
+    def run_dashmode(self): #TODO  - linux adaptation
         self.delete_files_in_folder(self.temp)
         with open('./Cache/software_path_dash.dat', 'r+') as fic:
             file = fic.readlines()
@@ -204,7 +207,7 @@ class MZmine():
                 f'{self.temp}',
             ]
             log = f'Begin of MZmine run for {os.path.basename(self.batchpath)}. '
-            Log.update(log)
+            logging_config.log_info(logger, log)
 
             # Run the subprocess and capture its output
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -218,11 +221,11 @@ class MZmine():
                 log = f'Done - Error running MZmine: {result.stderr}'
                 self.message = log
 
-            Log.update(log)
+            logging_config.log_info(logger, log)
             print(log)  # Adjust according to how you want to handle logging
         else:
             log = "Done - MZmine path not found in the software_path_dash.dat file."
-            Log.update(log)
+            logging_config.log_warning(logger, log)
             print(log)  # Adjust according to how you want to handle logging
             self.message = log
         return self.message

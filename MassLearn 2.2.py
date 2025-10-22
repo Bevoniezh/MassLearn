@@ -11,14 +11,17 @@ import lz4
 import dash
 import shutil
 import pickle
+import logging
 from diskcache import Cache
-import Modules.cache_manager as cm
 import dash_bootstrap_components as dbc
 from dash import html, dcc, dash_table, callback_context, callback
 from dash.dependencies import Input, Output, State, ClientsideFunction
+from Modules import logging_config
 
 masslearn_logo = "/assets/logo.png"
-Log = cm.LogManager()
+
+logging_config.configure_logging()
+logger = logging.getLogger(__name__)
 cache_path = './disk_cache'
 current_path= os.getcwd()
 import Modules.file_manager
@@ -35,7 +38,6 @@ cache = Cache(cache_path) # this is the disk cache for session variable in the d
 cache.clear()
 # Clear the cache
 cache.set('logo', masslearn_logo)
-cache.set('log', Log)
 cache.set('identity', None)
 cache.set('project', {})
 print(f'project cache app: {cache.get("project")}')

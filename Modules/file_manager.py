@@ -8,13 +8,17 @@ Created on Tue Apr 25 17:42:55 2023
 import os
 import re
 import pickle
+import logging
 import lz4.frame
 import pandas as pd
 import matplotlib.pyplot as plt
 import Modules.cache_manager as cache
 import Modules.CLI_text as cli
+from Modules import logging_config
 
 MassLearn_directory = r'D:\Metabolomic\MassLearn 2.2'
+
+logger = logging.getLogger(__name__)
 #TODO : write here the masslearn folder with the installation software tool
 
 class FileManager():
@@ -22,7 +26,7 @@ class FileManager():
     Class to manage saving NEW file, from different extensions
     Use as the following example:
         object = FileManager('batch_1', '../Batch_files', xmltreeparser, 'xml')
-        object.saving_file(Log) # will save the file with desired name in desired location in desired format extension
+        object.saving_file() # will save the file with desired name in desired location in desired format extension
     """
     def __init__(self, Filename = '', Folder = '', Data = '', Extension = ''): # Filename is path/name.extension, Folder is absolute or relative (from MassLearn/) folder where the file is saved, Data is the raw data to be written, Extension can be 'csv', '0ds', 'txt' and 'xml'
         self.data = Data # Data of the file
@@ -78,40 +82,40 @@ class FileManager():
             
         
     # Function to manage saving new files
-    def saving_file(self, Log, Handle = True): 
+    def saving_file(self, handle=True, project=None):
         new_path = self.path
-        if Handle == True: # Handle is a safeguard for the files which need to be tested. Is the name have already been validated with validity()y, it is useless (typically for feature list and batch files generation)
+        if handle == True: # Handle is a safeguard for the files which need to be tested. Is the name have already been validated with validity()y, it is useless (typically for feature list and batch files generation)
             if os.path.isfile(self.path):
                 new_path = self.handle_existing_file()
                 if new_path is None:
                     log = "Saving canceled."
-                    Log.update(log)
+                    logging_config.log_info(logger, log, project=project)
                     print(f"\n{log}")
                     return None # TODO - close the current window and go back to precedent menu
                 else: # saving file with new path
-                    new_path = os.path.join(self.folder, new_path + self.extension) 
+                    new_path = os.path.join(self.folder, new_path + self.extension)
                     base = os.path.splitext(new_path)[0] # take only the name, not the extension
-                    self.writing_protocol(base, Log)
+                    self.writing_protocol(base, project=project)
             else:
                 base = os.path.splitext(self.path)[0] # take only the name, not the extension
-                self.writing_protocol(base, Log)
+                self.writing_protocol(base, project=project)
         else:
             base = os.path.splitext(self.path)[0] # take only the name, not the extension
-            self.writing_protocol(base, Log)               
+            self.writing_protocol(base, project=project)
         return new_path
     
     # Function to manage saving new files
-    def saving_file_dash(self, Log, Project = None): 
+    def saving_file_dash(self, project=None):
         base = os.path.splitext(self.path)[0] # take only the name, not the extension
-        Log = self.writing_protocol(base, Log, Project)               
-        return Log
+        self.writing_protocol(base, project=project)
+        return self.path
     
     # Function to use the good protocol when writing a new file
-    def writing_protocol(self, Path, Log, Project = None):
+    def writing_protocol(self, Path, project=None):
         if self.extension == '.csv':
             self.data.to_csv(f'{Path}.csv', index = False)
             log = f'{os.path.basename(Path)}.csv saved.'
-            Log.update(log, Project)
+            logging_config.log_info(logger, log, project=project)
         elif self.extension == '_ms1.csv':
             suffix = Path.split('_')[-1]
             if suffix != 'ms1.csv':
@@ -120,7 +124,7 @@ class FileManager():
             else:
                 self.data.to_csv(f'{Path}.csv', index = False)
                 log = f'{os.path.basename(Path)}.csv saved.'
-            Log.update(log, Project)
+            logging_config.log_info(logger, log, project=project)
         elif self.extension == '_ms2.csv':
             suffix = Path.split('_')[-1]
             if suffix != 'ms2.csv':
@@ -129,24 +133,24 @@ class FileManager():
             else:
                 self.data.to_csv(f'{Path}.csv', index = False)
                 log = f'{os.path.basename(Path)}.csv saved.'
-            Log.update(log, Project)
+            logging_config.log_info(logger, log, project=project)
         elif self.extension == '.xml':
-            self.data.write(f'{Path}.xml', pretty_print=True, encoding='UTF-8')   
+            self.data.write(f'{Path}.xml', pretty_print=True, encoding='UTF-8')
             log = f'{os.path.basename(Path)}.xml saved.'
-            Log.update(log, Project)
+            logging_config.log_info(logger, log, project=project)
         elif self.extension == '.html':
             pass # html files are usually saved already in another object
-            
+
         elif self.extension == '.ods':
             self.data.save(f'{Path}.ods')
             log = f'{os.path.basename(Path)}.ods saved.'
-            Log.update(log, Project)
+            logging_config.log_info(logger, log, project=project)
         elif self.extension == '.txt':
             with open(f'{Path}.txt', "w") as file:
                 file.write(self.data)
             log = f'{os.path.basename(Path)}.txt saved.'
-            Log.update(log, Project)
-        elif self.extension == '.masslearn':   
+            logging_config.log_info(logger, log, project=project)
+        elif self.extension == '.masslearn':
             with lz4.frame.open(f'{Path}.masslearn', "wb") as file:
                 try:
                     pickle.dump(self.data, file)
@@ -155,8 +159,7 @@ class FileManager():
                     text = cli.DisplayText(text)
                     print(text.simple())
             log = f'{os.path.basename(Path)}.masslearn saved.'
-            Log.update(log, Project)
-        return Log
+            logging_config.log_info(logger, log, project=project)
             
     
     # Function for input error, only for strings
