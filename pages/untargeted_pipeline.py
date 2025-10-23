@@ -1035,7 +1035,7 @@ def process_files(files):
     Log = cache.get('log') 
     total_files = len(current_project.raw_files_path) 
     soft = cm.Software_DashApp()
-    Proteowizard_path = soft.path['ProteoWizard'] 
+    Proteowizard_path = soft.get_path('ProteoWizard')
     
     start_time = time.time()
     file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
