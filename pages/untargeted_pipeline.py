@@ -17,6 +17,7 @@ import scipy
 import shutil
 import threading
 import logging
+import subprocess
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -43,6 +44,13 @@ cache = Cache('./disk_cache')
 dash.register_page(__name__)
 
 logger = logging.getLogger(__name__)
+
+SOFTWARE_WARNING_STYLE = {
+    'maxWidth': '600px',
+    'fontSize': '12px',
+    'padding-left': '5px',
+    'padding-right': '5px',
+}
 
 print(f'project cache up: {cache.get("project")}')
 
@@ -107,6 +115,54 @@ line_count = 2 # the first number is directly displayed with the first layout co
 current_project = None
 sample_names = []
 msn_df = None
+
+
+class SoftwarePathError(RuntimeError):
+    """Raised when an external software path is missing or invalid."""
+
+
+def _get_configured_software_path(software_name: str, friendly_name: str) -> str:
+    """Return a validated filesystem path for an external dependency.
+
+    Parameters
+    ----------
+    software_name:
+        Identifier used in :class:`Modules.cache_manager.Software_DashApp`.
+    friendly_name:
+        Human-readable label included in error messages.
+    """
+
+    soft = cm.Software_DashApp()
+    raw_path = soft.get_path(software_name, default='').strip()
+
+    if not raw_path:
+        raise SoftwarePathError(
+            f"{friendly_name} path is not configured. Please go back to the Login page and set it before continuing."
+        )
+
+    normalised = os.path.normpath(os.path.abspath(raw_path))
+
+    if not os.path.exists(normalised):
+        raise SoftwarePathError(
+            f"The configured path for {friendly_name} does not exist: {normalised}. Update it from the Login page and try again."
+        )
+
+    return normalised
+
+
+def _launch_external_software(executable_path: str) -> None:
+    """Attempt to launch an external executable in a cross-platform manner."""
+
+    if hasattr(os, "startfile"):
+        os.startfile(executable_path)
+        return
+
+    try:
+        subprocess.Popen([executable_path])
+    except FileNotFoundError:
+        raise
+    except Exception as exc:  # pragma: no cover - defensive
+        raise OSError(f"Unable to launch {executable_path}: {exc}") from exc
 
 
 # Definition on main layouts:
@@ -761,24 +817,34 @@ def convert_raw_input(n_clicks, value):
     raise PreventUpdate()
        
                           
-seems_path = cache.get('seems.exe')                 
 @callback(
     Output("software-msg", "children"),
     [Input("open-seems-btn", "n_clicks")]
 )
 def open_seems(n_clicks):
     if n_clicks > 0:
-        if seems_path != 'no':
-            # Attempt to open the software - This will work only if this Dash app is running locally
-            try:
-                os.startfile(seems_path)
-                return "SeeMS opened"
-            except Exception:
-                return "Failed to open SeeMS. Try to open it externally."
-        else:
-            return dbc.ListGroupItem('Where is SeeMS? It seeMS we cannot run SeeMS from the path provided at the Login page. Go back to the Login and check for seems.exe path \
-                                     to be correctly defined.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',})
-                          
+        try:
+            seems_path = _get_configured_software_path('SeeMS', 'SeeMS (seems.exe)')
+        except SoftwarePathError as exc:
+            logging_config.log_warning(logger, str(exc))
+            return dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+
+        try:
+            _launch_external_software(seems_path)
+            return "SeeMS opened"
+        except FileNotFoundError as exc:
+            logging_config.log_error(logger, 'SeeMS executable not found: %s', exc)
+            return dbc.ListGroupItem(
+                "SeeMS executable cannot be found at the configured location. Please verify the path from the Login page.",
+                color="danger",
+                style=SOFTWARE_WARNING_STYLE,
+            )
+        except OSError as exc:  # pragma: no cover - defensive
+            logging_config.log_error(logger, 'Failed to open SeeMS: %s', exc, exc_info=True)
+            return "Failed to open SeeMS. Try to open it externally."
+
+    raise PreventUpdate()
+
                                 
 convert_raw = html.Div([ 
                 html.Div([        
@@ -937,6 +1003,13 @@ def validate_ms_noise_input(n_clicks, ms1, ms2):
     global current_project, line_count
     if n_clicks:
         if 0 <= ms1 and 0 <= ms2:
+            try:
+                _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+            except SoftwarePathError as exc:
+                logging_config.log_warning(logger, str(exc))
+                warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+                return warning, False, 'n'
+
             current_project.ms1_noise = ms1
             current_project.ms2_noise = ms2
             cache.set('project_loaded', current_project)
@@ -1025,9 +1098,16 @@ def process_files(files):
     global failure
     
     total_files = len(current_project.raw_files_path)
-    soft = cm.Software_DashApp()
-    Proteowizard_path = soft.path['ProteoWizard']
-    
+
+    try:
+        proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+    except SoftwarePathError as exc:
+        logging_config.log_error(logger, str(exc))
+        failure.append(str(exc))
+        global_progress = 100
+        estimated_total_time = 0
+        return
+
     start_time = time.time()
     file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
     for nb, file in enumerate(files):
@@ -1043,7 +1123,7 @@ def process_files(files):
             current_project.sample_names.append(sample_name)
             # Convert the file
             raw_to_convert = convert.RawToMZml([rawfile_path], current_project.rt_range[0], current_project.rt_range[1], file_type)
-            raw_to_convert.convert_file(Proteowizard_path)
+            raw_to_convert.convert_file(proteowizard_path)
             size_in_bytes = os.path.getsize(rawfolder_mzmlfile_path)
             size_in_kb = size_in_bytes / 1024 # Convert the size from bytes to kilobytes (1 KB = 1024 bytes)
             if size_in_kb < 300: # below 300kB it is not a satisfying mzml file
@@ -1132,7 +1212,7 @@ def update_conversion_progress(n):
             line_count += 1
             return [separating_line, template_part], progress, f"{progress}%" if progress > 0 else "", None, "Conversion and denoising complete", True
         else:
-            list_fail_samples = ', '.join(failure)[:-2]
+            list_fail_samples = ', '.join(failure)
             error_info = f'Error happened while processing: {list_fail_samples}.'
             err = [html.Br(), html.H5(error_info, style={'textAlign': 'center'})]
             return err, progress, f"{progress}%" if progress > 0 else "", None, "Conversion and denoising complete with errors.", True
@@ -1359,7 +1439,6 @@ template_part = html.Div([
 # 8- MZmine settings
 ###############################################################################  
 # Global variables to track the threads for mzmine process
-mzmine_path = cache.get('MZmine.exe')              
 @callback(
     [Output("execution-part", "children"),
      Output("mzmine-software-msg", "children"),
@@ -1487,17 +1566,28 @@ def manage_batch(template_n_click, batch_n_clicks, n_clicks_mzmine, n_clicks_con
         return "", "", "Then modify batches by opening: /features/yourbatchfile.xml", True, True, None, '', 'y'
     
     elif button_id == "up-mzmine-button":
-        if mzmine_path != 'no':
-            # Attempt to open the software - This will work only if this Dash app is running locally
-            try:
-                os.startfile(mzmine_path)
-                return "", "", "Then, open the feature list batch file from /features/yourbatchfile.xml", None, None, '', 'n'
-            except Exception:
-                return "", "Failed to open MZmine 3. Try to open it externally.", "Then modify batches by opening: /features/yourbatchfile.xml", None, '', 'n'
-        else:
-            return "", dbc.ListGroupItem('Where is MZmine 3? It seems we cannot run MZmine 3 from the path provided at the Login page. Go back to the Login and check for seems.exe path \
-                       to be correctly defined.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}), "Then modify batches by opening: /features/yourbatchfile.xml", dash.no_update , dash.no_update,  dash.no_update, '', 'n'
-    
+        try:
+            mzmine_path = _get_configured_software_path('MZmine', 'MZmine 3 (MZmine.exe)')
+        except SoftwarePathError as exc:
+            logging_config.log_warning(logger, str(exc))
+            warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+            return "", warning, "Then modify batches by opening: /features/yourbatchfile.xml", dash.no_update, dash.no_update, dash.no_update, '', 'n'
+
+        try:
+            _launch_external_software(mzmine_path)
+            return "", "", "Then, open the feature list batch file from /features/yourbatchfile.xml", dash.no_update, dash.no_update, dash.no_update, '', 'n'
+        except FileNotFoundError as exc:
+            logging_config.log_error(logger, 'MZmine executable not found: %s', exc)
+            error = dbc.ListGroupItem(
+                "MZmine executable cannot be found at the configured location. Please verify the path from the Login page.",
+                color="danger",
+                style=SOFTWARE_WARNING_STYLE,
+            )
+            return "", error, "Then modify batches by opening: /features/yourbatchfile.xml", dash.no_update, dash.no_update, dash.no_update, '', 'n'
+        except OSError as exc:  # pragma: no cover - defensive
+            logging_config.log_error(logger, 'Failed to open MZmine: %s', exc, exc_info=True)
+            return "", "Failed to open MZmine 3. Try to open it externally.", "Then modify batches by opening: /features/yourbatchfile.xml", dash.no_update, dash.no_update, dash.no_update, '', 'n'
+
     else:
         raise PreventUpdate()
     
