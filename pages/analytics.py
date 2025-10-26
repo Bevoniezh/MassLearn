@@ -18,7 +18,8 @@ import scipy
 import warnings
 import itertools
 import threading
-import scipy.stats  
+import scipy.stats
+from typing import Optional
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -40,6 +41,12 @@ from sklearn.cross_decomposition import PLSRegression
 from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from dash import html, dcc, dash_table, callback_context, callback
+
+from Modules.peak_shape import (
+    PeakShapeVectors,
+    build_peak_shape_vectors,
+    peak_shape_similarity,
+)
 
 cache = Cache('./disk_cache')
 
@@ -367,11 +374,13 @@ featurelistname = None
 featurepath = None
 FG_pair_shared_features = None
 fg_table = None # ic table is the list of feature groups based on the defined feature network
-fg_table_render =  pd.DataFrame()    
+fg_table_render =  pd.DataFrame()
 G = nx.Graph() # Create the G network, meaning the python object for feature network
 S = nx.Graph() # Network for the meta feature grouping
 ion_df = None
 ion_df_raw = None
+peak_shape_vectors: Optional[PeakShapeVectors] = None
+peak_shape_vectors_raw: Optional[PeakShapeVectors] = None
 levels = None
 loading_progress = None
 meta_intensities = None
@@ -406,6 +415,7 @@ def initiate_project(Project):
     global levels, sample_list, sample_list_raw, all_treatments, treatment_selection
     global dropdown_items, dropdown_items_binary
     global fg_table, fg_table_render
+    global peak_shape_vectors, peak_shape_vectors_raw
     
     project_loaded = Project
     featurelist = project_loaded.msn_df_deblanked
@@ -431,6 +441,14 @@ def initiate_project(Project):
     featurelist_raw = featurelist.copy(deep=True) # back up of the variable, necessary for the filtering option tool
     featurepath = project_loaded.featurepath
     featurelistname = project_loaded.name
+
+    peak_shape_vectors = build_peak_shape_vectors(featurelist)
+    if peak_shape_vectors is not None:
+        peak_shape_vectors_raw = PeakShapeVectors(
+            vectors=peak_shape_vectors.vectors.copy(deep=True)
+        )
+    else:
+        peak_shape_vectors_raw = None
     
 
     # Add the rt and m/z values for each feature
@@ -534,6 +552,7 @@ def initiate_project_meta(Project):
     global dropdown_items, dropdown_items_binary
     global S, FG_pair_shared_features, potential_neutral_masses_groups
     global fg_table, fg_table_render
+    global peak_shape_vectors, peak_shape_vectors_raw
     
     project_loaded = Project
     
@@ -545,6 +564,13 @@ def initiate_project_meta(Project):
     featurelist = featurelist.drop([col for col in featurelist.columns if not col or col.strip() == ''], axis=1)
     featurelist = featurelist.drop(columns = ['label'])
     featurelist_raw = featurelist.copy(deep=True)
+    peak_shape_vectors = build_peak_shape_vectors(featurelist)
+    if peak_shape_vectors is not None:
+        peak_shape_vectors_raw = PeakShapeVectors(
+            vectors=peak_shape_vectors.vectors.copy(deep=True)
+        )
+    else:
+        peak_shape_vectors_raw = None
     treatment = project_loaded.treatment
     fg_table, fg_table_render = None, pd.DataFrame() 
     # Find the list of sampels (without blank)
@@ -903,9 +929,15 @@ main_layout =  html.Div([
                                 size="sm"), 
 
                         dbc.InputGroup(
-                            [dbc.InputGroupText("Spearman Corr.", id='spearman-input'), 
-                             dbc.Input(id='correlation-threshold', 
+                            [dbc.InputGroupText("Spearman Corr.", id='spearman-input'),
+                             dbc.Input(id='correlation-threshold',
                                        type="number", value=0.9, step=0.01, min=0, max=1)],
+                            size="sm"
+                                ),
+                        dbc.InputGroup(
+                            [dbc.InputGroupText("Shape Corr.", id='shape-input'),
+                             dbc.Input(id='shape-threshold',
+                                       type="number", value=0.7, step=0.01, min=-1, max=1)],
                             size="sm"
                                 ),
                         dbc.Tooltip(
@@ -915,6 +947,10 @@ main_layout =  html.Div([
                         dbc.Tooltip(
                             "NORMAL MODE: Spearman correlation accross samples for each pair of feature. META MODE: m/z threshold between two potential neutral mass.", #  It need to have at least 50% of same samples with values != 0 in both features to be valid. I.e you have 10 samples in total, in f1 if there is 10 samples with values != 0, and in f2 at least 5 samples with values !=0, the correlation is calculated.
                             target="spearman-input",  # ID of the component to which the tooltip is attached
+                            placement="top"),
+                        dbc.Tooltip(
+                            "Cosine similarity of chromatographic-shape descriptors. Set to 0 to ignore the shape filter.",
+                            target="shape-input",
                             placement="top")], style={'display': 'flex','margin-bottom': '10px'}),
                     html.Div([
                         dbc.Container([
@@ -1034,7 +1070,7 @@ def spinner_update_button(n_clicks, n):
     global validity, Project_loaded
     ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
+
     if button_id == 'first-update-button':
         return dbc.Spinner(color="light", size="sm"), 'Loading', False
         
@@ -1512,7 +1548,8 @@ def display_options(Click = None): # Click is a None value when the filtering op
 
 # Function to remove or add (filter) treatments from the filtering options. Treatment variable are all treatment which are selected
 def filter_sample(Treatments):
-    global featurelist, all_treatments, sample_list, preprocessed_df, featurelist, dropdown_items, dropdown_items_binary
+    global featurelist, all_treatments, sample_list, preprocessed_df, featurelist
+    global dropdown_items, dropdown_items_binary, peak_shape_vectors
     raw_values = [t['value'] for t in all_treatments] # here are all the treatments no matter the levels, in a list
     to_filter = []
     for t in raw_values:
@@ -1529,6 +1566,7 @@ def filter_sample(Treatments):
     preprocessed_df.drop(sample_removed, axis=1, inplace=True)
     stand_preprocessed_df.drop(sample_removed, axis=1, inplace=True)
     featurelist = featurelist[~featurelist['sample'].isin(sample_removed)]
+    peak_shape_vectors = build_peak_shape_vectors(featurelist)
     dropdown_items, dropdown_items_binary  = dropdowns(sample_list)
     
 
@@ -1545,6 +1583,7 @@ def update_samples(Selected_treatments):
     global sample_list, dropdown_items, dropdown_items_binary
     global preprocessed_df, stand_preprocessed_df
     global featurelist
+    global peak_shape_vectors, peak_shape_vectors_raw
     global treatment_selection
     
     if trigger == 'filter-treatment':
@@ -1557,6 +1596,12 @@ def update_samples(Selected_treatments):
         featurelist = featurelist_raw.copy(deep=True)
         stand_preprocessed_df = stand_preprocessed_df_raw.copy(deep=True)
         dropdown_items, dropdown_items_binary = dropdowns(sample_list)
+        if peak_shape_vectors_raw is not None:
+            peak_shape_vectors = PeakShapeVectors(
+                vectors=peak_shape_vectors_raw.vectors.copy(deep=True)
+            )
+        else:
+            peak_shape_vectors = None
         # Step 2: Adapt sample list
         filter_sample(Selected_treatments)
         
@@ -2553,19 +2598,27 @@ def _group_size_counts(graph):
      Input('update-intensities', 'n_clicks')],
     State('rt-threshold', 'value'),
     State('correlation-threshold', 'value'), # it is also mz threshold in meta analysis
-    prevent_initial_call = True            
+    State('shape-threshold', 'value'),
+    prevent_initial_call = True
 )
-def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_threshold, Correlation_threshold): 
+def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_threshold, Correlation_threshold, Shape_threshold):
     global preprocessed_df, stand_preprocessed_df, preprocessed_df_raw
     global G, S, network_updated, updating, FG_pair_shared_features
     global stand_ion_df, ion_df, ion_df_raw
     global dropdown_items_binary, dropdown_items, fg_table, fg_table_render
     global validity, project_loaded, featurelist, meta_intensities
+    global peak_shape_vectors
     
-    ctx = dash.callback_context    
+    ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
-    if validity == False:        
+
+    if Shape_threshold is None:
+        Shape_threshold = 0.0
+    else:
+        Shape_threshold = max(-1.0, min(1.0, Shape_threshold))
+    apply_shape_filter = Shape_threshold > 0 and peak_shape_vectors is not None
+
+    if validity == False:
         raise PreventUpdate()
     if updating:
         raise PreventUpdate()
@@ -2624,19 +2677,40 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
         ratio_matrix = pd.DataFrame(ratio_matrix, index=valid_rows_df.index, columns=valid_rows_df.index)
         
         # Create the edges list
-        edges = [] # edges list tuples of len 3, with two correlated feature IDs and their corresponding correlation
+        edges = []  # edges list with correlation and shape similarity details
         # Iterate over the pairs in pairs_df
         for _, row in pairs_df.iterrows():
             feature = row['feature']
             other_feature = row['other_feature']
-            
+
             # Check if the correlation exists and is greater than 0.8
             if feature in correlation_matrix_sp.index and other_feature in correlation_matrix_sp.columns:
                 corr_value = correlation_matrix_sp.loc[feature, other_feature]
                 ratio_value = ratio_matrix.loc[feature, other_feature]
                 rt_diff = pairs_time_difference.loc[feature, other_feature]
-                if corr_value >= Correlation_threshold and ratio_value >= minimum_ratio_threshold and rt_diff <= Rt_threshold:
-                    edges.append((feature, other_feature, corr_value))
+                if (
+                    corr_value >= Correlation_threshold
+                    and ratio_value >= minimum_ratio_threshold
+                    and rt_diff <= Rt_threshold
+                ):
+                    shape_score = peak_shape_similarity(
+                        peak_shape_vectors, feature, other_feature
+                    )
+                    if shape_score is None:
+                        shape_score = 1.0
+                    if apply_shape_filter and shape_score < Shape_threshold:
+                        continue
+                    weight_shape = shape_score if apply_shape_filter else 1.0
+                    edge_weight = corr_value * max(weight_shape, 0.0)
+                    edges.append(
+                        (
+                            feature,
+                            other_feature,
+                            edge_weight,
+                            corr_value,
+                            shape_score,
+                        )
+                    )
 
         for feature in preprocessed_df.index:
             G.add_node(feature, mz=preprocessed_df.loc[feature, 'm/z'])
@@ -2645,7 +2719,14 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
             G.nodes[node]['rt'] = preprocessed_df.loc[node, 'rt']
             
         # Add edges with correlation as edge attribute
-        G.add_weighted_edges_from(edges)
+        for feature, other_feature, weight, corr_value, shape_score in edges:
+            G.add_edge(
+                feature,
+                other_feature,
+                weight=weight,
+                correlation=corr_value,
+                shape_similarity=shape_score,
+            )
         G_before = G.copy()
         total_before, counts_before = _group_size_counts(G_before)
         
