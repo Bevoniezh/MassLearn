@@ -3493,8 +3493,10 @@ def convert_graph_to_2d_plotly_figure(Network):
     # Create the 2D plot
     fig = go.Figure(data=[edge_trace, node_trace] + legend_traces,
                     layout=go.Layout(
-                        title= f'Network of {meta}FG  :  Nb of features:{len(preprocessed_df)}  -  Nb of {meta}FG: {len(ion_df)}',
-                        titlefont_size=16,
+                        title=dict(
+                            text=f'Network of {meta}FG  :  Nb of features:{len(preprocessed_df)}  -  Nb of {meta}FG: {len(ion_df)}',
+                            font=dict(size=16)
+                        ),
                         showlegend=True,
                         legend=dict(x=1, y=0.5, traceorder='normal'),
                         hovermode='closest',
