@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 from logging import Logger
 import os
 from pathlib import Path
@@ -216,3 +217,42 @@ def log_error(
 ) -> None:
     """Log an error message and update the optional project log."""
     _log(logger, logging.ERROR, message, args, project=project, extra=extra)
+
+
+def log_exception(
+    logger: Logger,
+    message: str,
+    *args: Any,
+    project: Optional[Any] = None,
+    extra: Optional[Dict[str, Any]] = None,
+    exception: Optional[BaseException] = None,
+) -> None:
+    """Log an error message alongside the active exception traceback."""
+
+    if not _configured:
+        configure_logging()
+
+    exc_info = exception
+    if exc_info is None:
+        exc_info = sys.exc_info()[1]
+
+    if isinstance(exc_info, BaseException):
+        exc_tuple = (exc_info.__class__, exc_info, exc_info.__traceback__)
+    else:
+        exc_tuple = sys.exc_info()
+
+    if not exc_tuple or exc_tuple[0] is None:
+        exc_tuple_to_log = None
+    else:
+        exc_tuple_to_log = exc_tuple
+
+    extra_payload: Dict[str, Any] = dict(extra) if extra else {}
+    extra_payload.setdefault("user", _user_filter.user)
+
+    logger.error(message, *args, extra=extra_payload, exc_info=exc_tuple_to_log)
+
+    if project is not None:
+        base_message = message % tuple(args) if args else message
+        if exc_tuple_to_log and exc_tuple_to_log[1]:
+            base_message = f"{base_message} | Exception: {exc_tuple_to_log[1]}"
+        project.update_log(base_message + "\n")
