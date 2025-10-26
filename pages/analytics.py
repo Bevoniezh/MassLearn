@@ -2362,8 +2362,8 @@ def stat_n_assumptions(Component, Sample_list, Sample_presence_threshold = 100):
         table = table.drop(columns=columns_to_drop)        
         table.sort_values(by='m/z', ascending = False) # sort by descending ordering of mass
     
-        # Group by feature and standardize within each group
-        sd_table = table.groupby('feature').apply(lambda x: standardize_group_Standardized(x, 'area'))
+        # Standardize within each feature without relying on deprecated groupby.apply behaviour
+        sd_table = standardize_group_Standardized(table, 'area')
         sd_table['std_v'] = sd_table['std_v'].round(2)
     
     all_sample_mean = {}
@@ -2575,8 +2575,18 @@ def average_standardized_values(Sd_table, Sample_list, Level):
 
 # Function to make z score standardization per feature (group)
 def standardize_group_Standardized(Group, Measure): # MEasure is height or area
-    Group['std_v'] = Group[Measure] / Group[Measure].max()
-    return Group
+    group_copy = Group.copy()
+
+    if 'feature' in group_copy.columns:
+        # Standardize values within each feature while preserving the original frame
+        max_values = group_copy.groupby('feature')[Measure].transform('max')
+        group_copy['std_v'] = group_copy[Measure] / max_values
+    else:
+        # Fallback for callers that provide a single feature subset
+        max_value = group_copy[Measure].max()
+        group_copy['std_v'] = group_copy[Measure] / max_value
+
+    return group_copy
 
 import collections
 def _group_size_counts(graph):
