@@ -3,12 +3,27 @@ from __future__ import annotations
 
 import logging
 from logging import Logger
+import os
 from pathlib import Path
 from typing import Optional, Sequence, Any, Dict
 
 LOG_FORMAT = "%(asctime)s | %(levelname)-8s | %(name)s | %(user)s | %(message)s"
 DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 DEFAULT_USER = "anonymous"
+
+
+def _default_base_dir() -> Path:
+    """Return the base directory that should contain runtime log artefacts."""
+
+    # Resolve to the repository root by default (Modules/..).
+    module_root = Path(__file__).resolve().parent
+    base_dir = module_root.parent
+
+    env_dir = os.getenv("MASSLEARN_DATA_DIR")
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+
+    return base_dir
 
 
 class UserContextFilter(logging.Filter):
@@ -43,7 +58,13 @@ class UserFileHandler(logging.Handler):
     def emit(self, record: logging.LogRecord) -> None:  # type: ignore[override]
         try:
             user = getattr(record, "user", DEFAULT_USER) or DEFAULT_USER
-            safe_user = user.replace("/", "_").replace("\\", "_").strip() or DEFAULT_USER
+            safe_user = (
+                user.replace("/", "_")
+                .replace("\\", "_")
+                .replace(":", "_")
+                .strip()
+                or DEFAULT_USER
+            )
             file_path = self._directory / f"{safe_user}.log"
             line = self.format(record)
             with file_path.open("a", encoding=self._encoding) as handle:
@@ -55,6 +76,7 @@ class UserFileHandler(logging.Handler):
 _user_filter = UserContextFilter()
 _formatter: Optional[logging.Formatter] = None
 _configured = False
+_base_directory = _default_base_dir()
 
 
 def configure_logging(force: bool = False) -> None:
@@ -63,9 +85,10 @@ def configure_logging(force: bool = False) -> None:
     if _configured and not force:
         return
 
-    data_dir = Path("data")
+    data_dir = _base_directory / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
-    session_log = Path("log.log")
+    session_log = _base_directory / "log.log"
+    session_log.parent.mkdir(parents=True, exist_ok=True)
     session_log.write_text("", encoding="utf-8")
     archive_log = data_dir / "log-backup"
     archive_log.touch(exist_ok=True)
