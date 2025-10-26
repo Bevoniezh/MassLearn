@@ -17,6 +17,7 @@ from lxml import etree
 from xml.etree.ElementTree import tostring
 import Modules.file_manager as fmanager
 import Modules.CLI_text as cli
+import Modules.cache_manager as cache_manager
 from Modules import logging_config
 
 logger = logging.getLogger(__name__)
@@ -191,12 +192,9 @@ class MZmine():
 
     def run_dashmode(self): #TODO  - linux adaptation
         self.delete_files_in_folder(self.temp)
-        with open('./Cache/software_path_dash.dat', 'r+') as fic:
-            file = fic.readlines()
-        for line in file:
-            if 'MZmine' in line:
-                mzmine_exe = line.split(' # ')[1][:-1] # -1 to remove the /n
-                
+        software_manager = cache_manager.Software_DashApp()
+        mzmine_exe = software_manager.get_path('MZmine', '').strip()
+
         if mzmine_exe:
             cmd = [
                 f'{mzmine_exe}',  # Make sure to adjust for Linux if needed
@@ -224,7 +222,7 @@ class MZmine():
             logging_config.log_info(logger, log)
             print(log)  # Adjust according to how you want to handle logging
         else:
-            log = "Done - MZmine path not found in the software_path_dash.dat file."
+            log = "Done - MZmine path not found. Configure it from the software manager."
             logging_config.log_warning(logger, log)
             print(log)  # Adjust according to how you want to handle logging
             self.message = log
