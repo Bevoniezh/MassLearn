@@ -1804,9 +1804,37 @@ feature_id = 0
 def adjust_process(Fl_path):  # JUST FOR A SINGLE MS LEVEL
     global current_project
     global feature_id
-    
-    featurelist_adj = pd.read_csv(Fl_path) # msx stands for ms1 or ms2
-    
+
+    project_context = current_project if getattr(current_project, "update_log", None) else None
+
+    logging_config.log_info(
+        logger,
+        "Loading feature list from %s",
+        Fl_path,
+        project=project_context,
+    )
+
+    try:
+        featurelist_adj = pd.read_csv(Fl_path) # msx stands for ms1 or ms2
+    except FileNotFoundError as exc:
+        logging_config.log_exception(
+            logger,
+            "Feature list missing at %s",
+            Fl_path,
+            project=project_context,
+            exception=exc,
+        )
+        raise
+    except Exception as exc:
+        logging_config.log_exception(
+            logger,
+            "Unable to load feature list %s",
+            Fl_path,
+            project=project_context,
+            exception=exc,
+        )
+        raise
+
     # Extract sample names and create a mapping dictionary for renaming columns
     column_mapping = {}
     
@@ -1886,8 +1914,28 @@ def adjust_process(Fl_path):  # JUST FOR A SINGLE MS LEVEL
     
     # Create the new DataFrame from rows_list
     featurelist_adj_final = pd.DataFrame(rows_list)
-    feature_id = max(featurelist_adj_final['feature'])
-    featurelist_adj_final['sample'] = featurelist_adj_final['sample'].str.replace('.mzML', '', regex=False)
+
+    if featurelist_adj_final.empty:
+        logging_config.log_warning(
+            logger,
+            "Feature list %s produced no usable rows after processing.",
+            Fl_path,
+            project=project_context,
+        )
+        return featurelist_adj_final
+
+    if 'sample' in featurelist_adj_final.columns:
+        featurelist_adj_final['sample'] = featurelist_adj_final['sample'].str.replace('.mzML', '', regex=False)
+
+    feature_id = int(featurelist_adj_final['feature'].max())
+
+    logging_config.log_info(
+        logger,
+        "Loaded %d processed features from %s",
+        len(featurelist_adj_final),
+        Fl_path,
+        project=project_context,
+    )
     return featurelist_adj_final
 
 def match_in_all_sub(row, all_sub_df):
@@ -2158,16 +2206,52 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     global current_project, line_count, line_count, treatment_groups, deblanking_featuregroup_info
     deblanking_featuregroup_info = 'Removing blank from feature list(s)...'
     msn_df_list = []
+    project_context = current_project if getattr(current_project, "update_log", None) else None
+    project_name = getattr(current_project, "name", "unknown")
+
+    logging_config.log_info(
+        logger,
+        "Starting deblanking for project %s (blank ratio 1/%s, rt threshold %s, correlation threshold %s)",
+        project_name,
+        Level,
+        Rt_threshold,
+        Correlation_threshold,
+        project=project_context,
+    )
     for exp_title in current_project.featurelist.keys():
         fl_msn_path = current_project.featurelist[exp_title]
+        logging_config.log_info(
+            logger,
+            "Processing feature list '%s' for project %s",
+            fl_msn_path,
+            project_name,
+            project=project_context,
+        )
         msn_adjusted = adjust_process(fl_msn_path)
         msn_df_list.append(msn_adjusted)
     msn_df = pd.concat(msn_df_list, ignore_index=True)
+    if msn_df.empty:
+        logging_config.log_warning(
+            logger,
+            "Combined feature list for project %s is empty after processing.",
+            project_name,
+            project=project_context,
+        )
     current_project.msn_df = msn_df
     msn_df_path = os.path.join(current_project.featurepath, current_project.name + '_msn.csv')
     current_project.msn_df_path = msn_df_path
-    current_project.msn_df.reset_index(drop=True).to_csv(msn_df_path, index=False)
-    
+    try:
+        current_project.msn_df.reset_index(drop=True).to_csv(msn_df_path, index=False)
+    except OSError as exc:
+        logging_config.log_exception(
+            logger,
+            "Failed to write combined feature list to %s",
+            msn_df_path,
+            project=project_context,
+            exception=exc,
+        )
+        raise
+
     # Deblanking part
     tables_list = current_project.tables_list
     msn_area = msn_df.pivot_table(index=['m/z', 'rt'], columns='sample', values='area').fillna(0)
@@ -2193,8 +2277,18 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     # Apply the function to filter msn_adj based on the presence of features in all_sub
     msn_df_deblanked = msn_df[msn_df.apply(match_in_all_sub, all_sub_df=all_sub_tables, axis=1)]
     msn_df_deblanked_path = os.path.join(current_project.featurepath, current_project.name + '_msn_deblanked.csv')
-    msn_df_deblanked.to_csv(msn_df_deblanked_path) # export file to csv
-    
+    try:
+        msn_df_deblanked.to_csv(msn_df_deblanked_path)
+    except OSError as exc:
+        logging_config.log_exception(
+            logger,
+            "Failed to persist deblanked feature list to %s",
+            msn_df_deblanked_path,
+            project=project_context,
+            exception=exc,
+        )
+        raise
+
     label_tables_list = current_project.label_tables_list
     labels_df = pd.DataFrame([
         {'sample': sample, 'label': table['label']}
@@ -2205,18 +2299,36 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     msn_df_deblanked['label'] = msn_df_deblanked.groupby('sample')['label'].transform(lambda x: '&&'.join(x.dropna().unique())) # Step 3: Combine labels for each sample
     msn_df_deblanked['label'] = msn_df_deblanked['label'].apply(lambda x: '&&'.join(sorted(set(x.split('&&'))))) # Ensure labels are unique and sorted
     msn_df_deblanked = msn_df_deblanked.drop_duplicates().reset_index(drop=True)
-    msn_df_deblanked.to_csv(msn_df_deblanked_path) # export file to csv
-    
+    try:
+        msn_df_deblanked.to_csv(msn_df_deblanked_path)
+    except OSError as exc:
+        logging_config.log_exception(
+            logger,
+            "Failed to update deblanked feature list at %s",
+            msn_df_deblanked_path,
+            project=project_context,
+            exception=exc,
+        )
+        raise
+
     if current_project.meta:
-        feature_grouping(msn_df_deblanked, Rt_threshold, Correlation_threshold) # important part, where if multiple template have been treated separately with mzmine, it reasign the features with the sample together based on rt and mz threshold. 
+        feature_grouping(msn_df_deblanked, Rt_threshold, Correlation_threshold) # important part, where if multiple template have been treated separately with mzmine, it reasign the features with the sample together based on rt and mz threshold.
         deblanking_featuregroup_info = 'Templates feature grouping complete.'
     else:
         deblanking_featuregroup_info = ''
-    current_project.msn_df_deblanked  = msn_df_deblanked 
+    current_project.msn_df_deblanked  = msn_df_deblanked
     current_project.treatment = treatment_groups
     current_project.complete = True
     cache.set('project_loaded', current_project)
     current_project.save()
+
+    logging_config.log_info(
+        logger,
+        "Deblanking completed for project %s. Output saved to %s",
+        project_name,
+        msn_df_deblanked_path,
+        project=project_context,
+    )
     
 @callback(
     [Output({"type": "popup", "index": 8}, 'children')
@@ -2229,8 +2341,51 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
          )
 def continue_to_deblanking(n_clicks, Level, rt_threshold, correlation_threshold): # Level is the blank to sample ratio signal, default is 5
     global current_project
-    if n_clicks == 1:  
-        deblank_and_grouping(Level, rt_threshold, correlation_threshold)
+    if n_clicks == 1:
+        project_name = getattr(current_project, 'name', 'unknown')
+        project_context = current_project if getattr(current_project, "update_log", None) else None
+        logging_config.log_info(
+            logger,
+            "Deblanking requested for project %s",
+            project_name,
+            project=project_context,
+        )
+        try:
+            deblank_and_grouping(Level, rt_threshold, correlation_threshold)
+        except FileNotFoundError as exc:
+            missing_file = getattr(exc, 'filename', None) or str(exc)
+            logging_config.log_exception(
+                logger,
+                "Deblanking aborted for project %s. Missing feature list: %s",
+                project_name,
+                missing_file,
+                project=project_context,
+                exception=exc,
+            )
+            return dbc.Alert(
+                f"The feature list {missing_file} could not be found. Please verify the file exists before continuing.",
+                color="danger",
+                className="mb-0",
+            )
+        except Exception as exc:
+            logging_config.log_exception(
+                logger,
+                "Unexpected error while deblanking project %s",
+                project_name,
+                project=project_context,
+                exception=exc,
+            )
+            return dbc.Alert(
+                "An unexpected error occurred during blank signal removal. Check the logs for more information.",
+                color="danger",
+                className="mb-0",
+            )
+        logging_config.log_info(
+            logger,
+            "Deblanking finished for project %s",
+            project_name,
+            project=project_context,
+        )
         return dash.no_update
     else:
         if current_project.complete == True:
