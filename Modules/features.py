@@ -204,22 +204,30 @@ class MZmine():
                 "-temp",
                 f'{self.temp}',
             ]
+            expected_output = os.path.abspath(self.fln)
             log = f'Begin of MZmine run for {os.path.basename(self.batchpath)}. '
             logging_config.log_info(logger, log)
 
             # Run the subprocess and capture its output
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
 
-            # Here you can handle result.stdout and result.stderr
-            # For example, logging output or checking for errors
-            if result.returncode == 0:
+            stderr = (result.stderr or '').strip()
+            if result.returncode != 0:
+                log = f'Done - Error running MZmine: {stderr if stderr else "Unknown error."}'
+                self.message = log
+                logging_config.log_error(logger, log)
+            elif not os.path.exists(expected_output):
+                log = (
+                    "Done - MZmine finished but the expected feature list was not created. "
+                    f"Expected file: {expected_output}. Make sure MZmine is running and that you are signed in with a valid account before launching the process."
+                )
+                self.message = log
+                logging_config.log_error(logger, log)
+            else:
                 log = f'Feature list {os.path.basename(self.fln)} created.'
                 self.message = log
-            else:
-                log = f'Done - Error running MZmine: {result.stderr}'
-                self.message = log
+                logging_config.log_info(logger, log)
 
-            logging_config.log_info(logger, log)
             print(log)  # Adjust according to how you want to handle logging
         else:
             log = "Done - MZmine path not found. Configure it from the software manager."

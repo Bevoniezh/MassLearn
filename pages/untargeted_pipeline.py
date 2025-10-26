@@ -1667,7 +1667,19 @@ mzmine_settings = html.Div([
                             "For meta-analysis with many templates, involving experiments with slight differences.",
                             target="meta-analysis",  # ID of the component to which the tooltip is attached
                             placement="top"),
-                        html.Br(),  
+                        html.Br(),
+                        dbc.Alert(
+                            [
+                                html.P(
+                                    "Before launching MZmine, make sure the application is running and that a valid account is signed in. "
+                                    "If no account is logged in, MZmine will not generate the feature list.",
+                                    style={'margin-bottom': '0px'}
+                                )
+                            ],
+                            color="warning",
+                            style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px', 'padding-right': '5px'}
+                        ),
+                        html.Br(),
                         dbc.Button('Launch MZmine', id='mzmine', color="primary", n_clicks=0, disabled = True),
                         dbc.Tooltip(
                             "The batch files are generated in /feature. You can open and modify them with MZmine",
