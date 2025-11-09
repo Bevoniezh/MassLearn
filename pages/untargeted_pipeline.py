@@ -687,50 +687,38 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
         raise PreventUpdate
 
     if button_id == 'mzml-alternative':
-        current_project.mzml_files_path = [filename for filename in glob.glob(os.path.join(current_project.mzml_folder_path, '*')) if filename.lower().endswith('.mzml')]
+        current_project.mzml_files_path = sorted(
+            [
+                filename
+                for filename in glob.glob(os.path.join(current_project.mzml_folder_path, '*'))
+                if filename.lower().endswith('.mzml')
+            ]
+        )
         if len(current_project.mzml_files_path) == 0:
             mzml_loading = -1 # tag for error of files
-            return dash.no_update, "No files detected in the /mzML folder! Please copy your files before pushing the button.", None, None, True, 'y'         
+            return dash.no_update, "No files detected in the /mzML folder! Please copy your files before pushing the button.", None, None, True, 'y'
         elif (len(current_project.mzml_files_path)<3):
             mzml_loading = 100
-            return dash.no_update, "MassLearn detect less than 3 files. You need at least one blank, one sample for treatment 1 and one sample for treamtment 2 to have any an analysis.", None, None, True, 'y' 
+            return dash.no_update, "MassLearn detect less than 3 files. You need at least one blank, one sample for treatment 1 and one sample for treamtment 2 to have any an analysis.", None, None, True, 'y'
 
         mzml_alternative = True
-        # load the files Mass Spectra
-        for count, file in enumerate(current_project.mzml_files_path):
-            rawfile_path_noext, _ = os.path.splitext(file)
-            sample_name = os.path.basename(rawfile_path_noext)
-            current_project.sample_names.append(sample_name)
-            spectra = cleaning.Spectra(file) # take all the spectra data
-            spectra.extract_peaks(0, 0) # extract the MSs from the file, 0 are Noise background threshold. Because hte fiels have already been cut, this information is only for the function consistency
-            pk1 = spectra.peakarray1 # peakarray is the array containg all spectral info
-            rt1 = spectra.rt1
-            pk2 = spectra.peakarray2 # MS level 2
-            rt2  = spectra.rt2
-
-            ms1_spectra = {}
-            for rt, pk in zip(rt1, pk1):
-                mask = ~(np.all(pk == 0, axis=1))
-                ms1_spectra[rt] = pk[mask]
-            ms2_spectra = {}
-            for rt, pk in zip(rt2, pk2):
-                mask = ~(np.all(pk == 0, axis=1))
-                ms2_spectra[rt] = pk[mask]
-            current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra
-            mzml_loading = int(((count + 1) / len(current_project.mzml_files_path)) *100) # charge the value for progress bar
+        current_project.sample_names = []
+        current_project.raw_files_path = []
+        current_project.files_spectra = {}
         cache.set('project_loaded', current_project)
-        current_project.save()
+        mzml_loading = 100
         separating_line = create_separating_line(line_count)
         line_count += 1
-        new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
-        return [separating_line, new_popup, template_part], f"{count + 1} files added to the project.", None, None, True, 'y'
-    
+        new_popup = html.Div(children = '', id={"type": "popup", "index": 4}, style={'display': 'none'})
+        return [separating_line, new_popup, noise_threshold], f"{len(current_project.mzml_files_path)} files detected.", None, None, True, 'y'
+
     if n_submit:
         path_to_check = normalize_path(path_to_check)
         file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
         info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
         # Add your validation logic here
         if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
+            mzml_alternative = False
             logging_config.log_info(logger, 'Raw files path: %s added.', path_to_check)
 
             current_project.raw_folder_path = path_to_check
@@ -998,17 +986,20 @@ noise_threshold = html.Div([
     [State("ms1-noise", "value"),
      State("ms2-noise", "value")],
     prevent_initial_call = True
-)                        
+)
 def validate_ms_noise_input(n_clicks, ms1, ms2):
-    global current_project, line_count
+    global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
     if n_clicks:
         if 0 <= ms1 and 0 <= ms2:
-            try:
-                _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
-            except SoftwarePathError as exc:
-                logging_config.log_warning(logger, str(exc))
-                warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
-                return warning, False, 'n'
+            if not mzml_alternative:
+                try:
+                    proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+                except SoftwarePathError as exc:
+                    logging_config.log_warning(logger, str(exc))
+                    warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+                    return warning, False, 'n'
+            else:
+                proteowizard_path = None
 
             current_project.ms1_noise = ms1
             current_project.ms2_noise = ms2
@@ -1019,8 +1010,18 @@ def validate_ms_noise_input(n_clicks, ms1, ms2):
                 ms1,
                 ms2,
             )
-            
-            threading.Thread(target=process_files, args=(current_project.raw_files_path,)).start()
+
+            global_progress = 0
+            failure = []
+            start_time = None
+            estimated_total_time = None
+
+            if mzml_alternative:
+                processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
+            else:
+                processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
+
+            processing_thread.start()
             separating_line = create_separating_line(line_count)
             line_count += 1
             new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
@@ -1089,27 +1090,27 @@ def save_project():
     global current_project
     saving = current_project.save()
 
-def process_files(files):
+def process_files(files, proteowizard_path):
     global global_progress
     global current_project
     global start_time
     global estimated_total_time
     global sample_names
     global failure
-    
-    total_files = len(current_project.raw_files_path)
 
-    try:
-        proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
-    except SoftwarePathError as exc:
-        logging_config.log_error(logger, str(exc))
-        failure.append(str(exc))
+    total_files = len(files)
+
+    if total_files == 0:
         global_progress = 100
         estimated_total_time = 0
+        failure.append('No files provided for conversion.')
         return
 
     start_time = time.time()
     file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
+    current_project.sample_names = []
+    current_project.mzml_files_path = []
+    current_project.files_spectra = {}
     for nb, file in enumerate(files):
         try:
             # Define all types of file name, path, etc
@@ -1168,6 +1169,56 @@ def process_files(files):
             estimated_total_time = elapsed_time / 0.1
     sample_names = current_project.sample_names
 
+
+def process_mzml_files(files):
+    global global_progress
+    global current_project
+    global start_time
+    global estimated_total_time
+    global sample_names
+    global failure
+
+    total_files = len(files)
+
+    if total_files == 0:
+        global_progress = 100
+        estimated_total_time = 0
+        failure.append('No mzML files detected for denoising.')
+        return
+
+    start_time = time.time()
+    current_project.sample_names = []
+    current_project.files_spectra = {}
+    for nb, file in enumerate(files):
+        rawfile_path_noext, _ = os.path.splitext(file)
+        sample_name = os.path.basename(rawfile_path_noext)
+        try:
+            spectra = cleaning.Spectra(file)
+            spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise)
+            to_denoise_file = cleaning.Denoise(file, current_project.featurepath)
+            denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
+                spectra,
+                current_project.noise_trace_threshold,
+                Dash_app=True,
+            )
+            current_project.sample_names.append(sample_name)
+            current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra
+            logging_config.log_info(logger, '%s denoised.', sample_name)
+        except Exception:
+            logging_config.log_error(logger, '%s denoising failure.', sample_name)
+            print(f'{sample_name} denoising failure.')
+            failure.append(sample_name)
+
+        global_progress = int(((nb + 1) / (total_files)) * 100)
+        if global_progress == 0:
+            global_progress == 1
+        elapsed_time = time.time() - start_time
+        try:
+            estimated_total_time = elapsed_time / (global_progress / 100)
+        except Exception:
+            estimated_total_time = elapsed_time / 0.1
+    sample_names = current_project.sample_names
+
 @callback(
     [Output("template-part", "children"),
      Output("denoise-progress", "value"), 
@@ -1184,9 +1235,10 @@ def update_conversion_progress(n):
     global start_time
     global estimated_total_time
     global failure
-    
+    global mzml_alternative
+
     progress = global_progress
-    
+
     if start_time != None:
         elapsed_time = time.time() - start_time
     else:
@@ -1210,12 +1262,21 @@ def update_conversion_progress(n):
             thread_project.start()
             separating_line = create_separating_line(line_count)
             line_count += 1
-            return [separating_line, template_part], progress, f"{progress}%" if progress > 0 else "", None, "Conversion and denoising complete", True
+            if mzml_alternative:
+                completion_message = "Denoising complete"
+            else:
+                completion_message = "Conversion and denoising complete"
+            return [separating_line, template_part], progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
         else:
             list_fail_samples = ', '.join(failure)
-            error_info = f'Error happened while processing: {list_fail_samples}.'
+            if mzml_alternative:
+                error_info = f'Error happened while denoising: {list_fail_samples}.'
+                completion_message = "Denoising complete with errors."
+            else:
+                error_info = f'Error happened while processing: {list_fail_samples}.'
+                completion_message = "Conversion and denoising complete with errors."
             err = [html.Br(), html.H5(error_info, style={'textAlign': 'center'})]
-            return err, progress, f"{progress}%" if progress > 0 else "", None, "Conversion and denoising complete with errors.", True
+            return err, progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
 
 progress = html.Div([
                 html.Div([ 
