@@ -690,42 +690,27 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
         current_project.mzml_files_path = [filename for filename in glob.glob(os.path.join(current_project.mzml_folder_path, '*')) if filename.lower().endswith('.mzml')]
         if len(current_project.mzml_files_path) == 0:
             mzml_loading = -1 # tag for error of files
-            return dash.no_update, "No files detected in the /mzML folder! Please copy your files before pushing the button.", None, None, True, 'y'         
+            return dash.no_update, "No files detected in the /mzML folder! Please copy your files before pushing the button.", None, None, True, 'y'
         elif (len(current_project.mzml_files_path)<3):
             mzml_loading = 100
-            return dash.no_update, "MassLearn detect less than 3 files. You need at least one blank, one sample for treatment 1 and one sample for treamtment 2 to have any an analysis.", None, None, True, 'y' 
+            return dash.no_update, "MassLearn detect less than 3 files. You need at least one blank, one sample for treatment 1 and one sample for treamtment 2 to have any an analysis.", None, None, True, 'y'
 
         mzml_alternative = True
-        # load the files Mass Spectra
-        for count, file in enumerate(current_project.mzml_files_path):
-            rawfile_path_noext, _ = os.path.splitext(file)
-            sample_name = os.path.basename(rawfile_path_noext)
-            current_project.sample_names.append(sample_name)
-            spectra = cleaning.Spectra(file) # take all the spectra data
-            spectra.extract_peaks(0, 0) # extract the MSs from the file, 0 are Noise background threshold. Because hte fiels have already been cut, this information is only for the function consistency
-            pk1 = spectra.peakarray1 # peakarray is the array containg all spectral info
-            rt1 = spectra.rt1
-            pk2 = spectra.peakarray2 # MS level 2
-            rt2  = spectra.rt2
-
-            ms1_spectra = {}
-            for rt, pk in zip(rt1, pk1):
-                mask = ~(np.all(pk == 0, axis=1))
-                ms1_spectra[rt] = pk[mask]
-            ms2_spectra = {}
-            for rt, pk in zip(rt2, pk2):
-                mask = ~(np.all(pk == 0, axis=1))
-                ms2_spectra[rt] = pk[mask]
-            current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra
+        current_project.sample_names = []
+        current_project.files_spectra = {}
+        current_project.raw_files_path = []
+        current_project.mzml_files_path.sort()
+        for count, _ in enumerate(current_project.mzml_files_path):
             mzml_loading = int(((count + 1) / len(current_project.mzml_files_path)) *100) # charge the value for progress bar
         cache.set('project_loaded', current_project)
         current_project.save()
         separating_line = create_separating_line(line_count)
         line_count += 1
-        new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
-        return [separating_line, new_popup, template_part], f"{count + 1} files added to the project.", None, None, True, 'y'
+        new_popup = html.Div(children = '', id={"type": "popup", "index": 2}, style={'display': 'none'})
+        return [separating_line, new_popup, noise_threshold], f"{len(current_project.mzml_files_path)} files added to the project. Define noise thresholds to continue.", None, None, True, 'y'
     
     if n_submit:
+        mzml_alternative = False
         path_to_check = normalize_path(path_to_check)
         file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
         info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
@@ -1000,15 +985,16 @@ noise_threshold = html.Div([
     prevent_initial_call = True
 )                        
 def validate_ms_noise_input(n_clicks, ms1, ms2):
-    global current_project, line_count
+    global current_project, line_count, mzml_alternative
     if n_clicks:
         if 0 <= ms1 and 0 <= ms2:
-            try:
-                _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
-            except SoftwarePathError as exc:
-                logging_config.log_warning(logger, str(exc))
-                warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
-                return warning, False, 'n'
+            if not mzml_alternative:
+                try:
+                    _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+                except SoftwarePathError as exc:
+                    logging_config.log_warning(logger, str(exc))
+                    warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+                    return warning, False, 'n'
 
             current_project.ms1_noise = ms1
             current_project.ms2_noise = ms2
@@ -1019,8 +1005,12 @@ def validate_ms_noise_input(n_clicks, ms1, ms2):
                 ms1,
                 ms2,
             )
-            
-            threading.Thread(target=process_files, args=(current_project.raw_files_path,)).start()
+
+            if mzml_alternative:
+                files_to_process = current_project.mzml_files_path
+            else:
+                files_to_process = current_project.raw_files_path
+            threading.Thread(target=process_files, args=(files_to_process,)).start()
             separating_line = create_separating_line(line_count)
             line_count += 1
             new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
@@ -1096,50 +1086,67 @@ def process_files(files):
     global estimated_total_time
     global sample_names
     global failure
-    
-    total_files = len(current_project.raw_files_path)
+    global mzml_alternative
 
-    try:
-        proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
-    except SoftwarePathError as exc:
-        logging_config.log_error(logger, str(exc))
-        failure.append(str(exc))
+    total_files = len(files)
+
+    if total_files == 0:
         global_progress = 100
         estimated_total_time = 0
         return
+
+    failure = []
+
+    if not mzml_alternative:
+        try:
+            proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+        except SoftwarePathError as exc:
+            logging_config.log_error(logger, str(exc))
+            failure.append(str(exc))
+            global_progress = 100
+            estimated_total_time = 0
+            return
+    else:
+        proteowizard_path = None
 
     start_time = time.time()
     file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
     for nb, file in enumerate(files):
         try:
-            # Define all types of file name, path, etc
-            rawfile_path = file
-            rawfile_path_noext, _ = os.path.splitext(file)
-            sample_name = os.path.basename(rawfile_path_noext)
-            rawfolder_mzmlfile_path = rawfile_path_noext + '.mzML'
-            mzmlfile_basename = os.path.basename(rawfolder_mzmlfile_path)
-            mzmlfolder_mzmlfile_path = os.path.join(current_project.mzml_folder_path, mzmlfile_basename)
-            current_project.mzml_files_path.append(mzmlfolder_mzmlfile_path)
-            current_project.sample_names.append(sample_name)
-            # Convert the file
-            raw_to_convert = convert.RawToMZml([rawfile_path], current_project.rt_range[0], current_project.rt_range[1], file_type)
-            raw_to_convert.convert_file(proteowizard_path)
+            if mzml_alternative:
+                rawfolder_mzmlfile_path = file
+                sample_name = os.path.splitext(os.path.basename(file))[0]
+                if sample_name not in current_project.sample_names:
+                    current_project.sample_names.append(sample_name)
+            else:
+                rawfile_path = file
+                rawfile_path_noext, _ = os.path.splitext(file)
+                sample_name = os.path.basename(rawfile_path_noext)
+                rawfolder_mzmlfile_path = rawfile_path_noext + '.mzML'
+                mzmlfile_basename = os.path.basename(rawfolder_mzmlfile_path)
+                mzmlfolder_mzmlfile_path = os.path.join(current_project.mzml_folder_path, mzmlfile_basename)
+                current_project.mzml_files_path.append(mzmlfolder_mzmlfile_path)
+                current_project.sample_names.append(sample_name)
+                raw_to_convert = convert.RawToMZml([rawfile_path], current_project.rt_range[0], current_project.rt_range[1], file_type)
+                raw_to_convert.convert_file(proteowizard_path)
+
             size_in_bytes = os.path.getsize(rawfolder_mzmlfile_path)
             size_in_kb = size_in_bytes / 1024 # Convert the size from bytes to kilobytes (1 KB = 1024 bytes)
             if size_in_kb < 300: # below 300kB it is not a satisfying mzml file
                 logging_config.log_warning(logger, '%s too small, removed from the file list.', sample_name)
-            else:
-                # Denoise the file
-                spectra = cleaning.Spectra(rawfolder_mzmlfile_path) # take all the spectra data
-                spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise) # peak variable is only here to allow loading bar to not be disturbe
-                to_denoise_file = cleaning.Denoise(rawfolder_mzmlfile_path, current_project.featurepath)
-                denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
-                    spectra,
-                    current_project.noise_trace_threshold,
-                    Dash_app=True,
-                ) # denoised_spectra is the spectra class object from cleaning module, containing lots of attributes. Encoded are just variables with basice array denoised
-                current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra ##### Important: here you find the spectra files, use it to plot the features
-                # Move and delete the files
+                continue
+
+            spectra = cleaning.Spectra(rawfolder_mzmlfile_path) # take all the spectra data
+            spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise) # peak variable is only here to allow loading bar to not be disturbe
+            to_denoise_file = cleaning.Denoise(rawfolder_mzmlfile_path, current_project.featurepath)
+            denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
+                spectra,
+                current_project.noise_trace_threshold,
+                Dash_app=True,
+            ) # denoised_spectra is the spectra class object from cleaning module, containing lots of attributes. Encoded are just variables with basice array denoised
+            current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra ##### Important: here you find the spectra files, use it to plot the features
+
+            if not mzml_alternative:
                 if os.path.exists(mzmlfolder_mzmlfile_path):
                     os.remove(mzmlfolder_mzmlfile_path)
                     shutil.move(rawfolder_mzmlfile_path, current_project.mzml_folder_path)
@@ -1147,14 +1154,18 @@ def process_files(files):
                     shutil.move(rawfolder_mzmlfile_path, current_project.mzml_folder_path)
                 if os.path.exists(rawfolder_mzmlfile_path):
                     os.remove(rawfolder_mzmlfile_path)
-
                 logging_config.log_info(logger, '%s converted and denoised.', sample_name)
+            else:
+                logging_config.log_info(logger, '%s denoised.', sample_name)
         except Exception:
-            rawfile_path = file
             rawfile_path_noext, _ = os.path.splitext(file)
             sample_name = os.path.basename(rawfile_path_noext)
-            logging_config.log_error(logger, '%s conversion failure.', sample_name)
-            print(f'{sample_name} conversion failure.')
+            if mzml_alternative:
+                logging_config.log_error(logger, '%s denoising failure.', sample_name)
+                print(f'{sample_name} denoising failure.')
+            else:
+                logging_config.log_error(logger, '%s conversion failure.', sample_name)
+                print(f'{sample_name} conversion failure.')
 
             failure.append(sample_name)
 
