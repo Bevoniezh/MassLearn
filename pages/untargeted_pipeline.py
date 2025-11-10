@@ -1149,11 +1149,16 @@ def process_files(files):
                     os.remove(rawfolder_mzmlfile_path)
 
                 logging_config.log_info(logger, '%s converted and denoised.', sample_name)
-        except Exception:
+        except Exception as exc:
             rawfile_path = file
             rawfile_path_noext, _ = os.path.splitext(file)
             sample_name = os.path.basename(rawfile_path_noext)
-            logging_config.log_error(logger, '%s conversion failure.', sample_name)
+            logging_config.log_exception(
+                logger,
+                '%s conversion failure.',
+                sample_name,
+                exception=exc,
+            )
             print(f'{sample_name} conversion failure.')
 
             failure.append(sample_name)
