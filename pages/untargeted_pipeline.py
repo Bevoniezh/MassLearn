@@ -688,11 +688,9 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
 
     if button_id == 'mzml-alternative':
         current_project.mzml_files_path = sorted(
-            [
-                filename
-                for filename in glob.glob(os.path.join(current_project.mzml_folder_path, '*'))
-                if filename.lower().endswith('.mzml')
-            ]
+            filename
+            for filename in glob.glob(os.path.join(current_project.mzml_folder_path, '*'))
+            if filename.lower().endswith('.mzml')
         )
         if len(current_project.mzml_files_path) == 0:
             mzml_loading = -1 # tag for error of files
@@ -703,8 +701,8 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
 
         mzml_alternative = True
         current_project.sample_names = []
-        current_project.raw_files_path = []
         current_project.files_spectra = {}
+        current_project.raw_files_path = []
         cache.set('project_loaded', current_project)
         mzml_loading = 100
         separating_line = create_separating_line(line_count)
@@ -718,12 +716,12 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
         info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
         # Add your validation logic here
         if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
-            mzml_alternative = False
             logging_config.log_info(logger, 'Raw files path: %s added.', path_to_check)
 
             current_project.raw_folder_path = path_to_check
             current_project.raw_file_type = file_type
             current_project.raw_files_path = get_raw_files(path_to_check, file_type)
+            mzml_alternative = False
             cache.set('project_loaded', current_project)
             separating_line = create_separating_line(line_count)
             line_count += 1
@@ -1037,7 +1035,7 @@ ms_noise = html.Div([
                 """, color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
                     html.Br(),
                     html.H1(''),
-                    html.H5('Enter the Noise threshold and click on "Begin conversion and denoising"', style={'textAlign': 'center'}),                        
+                    html.H5('Enter the Noise threshold and click on "Begin processing"', style={'textAlign': 'center'}),
                     dbc.InputGroup([ 
                         dbc.InputGroupText("MS level 1 minimum intensity detectable"),  # Adding a label
                         dbc.Input(id='ms1-noise', 
@@ -1060,7 +1058,7 @@ ms_noise = html.Div([
                         dbc.InputGroupText("ions"),  # Adding "%" at the end of the input bar
                             ], style={'maxWidth': '490px'}),
                     html.Br(),
-                    dbc.Button("Begin conversion and denoising", id = "ms-noise-button", color="primary", n_clicks=0),
+                    dbc.Button("Begin processing", id = "ms-noise-button", color="primary", n_clicks=0),
                     dbc.Tooltip(
                         "Below this limit of ion count, all signal from MS level 1 (mostly potential precursor ions) detected by the Mass Spectrometer will be removed natively from the files.",
                         target='ms1-noise',  # ID of the component to which the tooltip is attached
@@ -1189,6 +1187,7 @@ def process_mzml_files(files):
     start_time = time.time()
     current_project.sample_names = []
     current_project.files_spectra = {}
+
     for nb, file in enumerate(files):
         rawfile_path_noext, _ = os.path.splitext(file)
         sample_name = os.path.basename(rawfile_path_noext)
@@ -1217,6 +1216,7 @@ def process_mzml_files(files):
             estimated_total_time = elapsed_time / (global_progress / 100)
         except Exception:
             estimated_total_time = elapsed_time / 0.1
+
     sample_names = current_project.sample_names
 
 @callback(
@@ -1236,9 +1236,9 @@ def update_conversion_progress(n):
     global estimated_total_time
     global failure
     global mzml_alternative
-
+    
     progress = global_progress
-
+    
     if start_time != None:
         elapsed_time = time.time() - start_time
     else:
@@ -1284,7 +1284,7 @@ progress = html.Div([
                     html.Br(),
                     html.Br(),
                     dcc.Interval(id="denoise-progress-interval", n_intervals=0, interval=500), # interval is the delay in ms when the data are updated
-                    html.H5(children = 'Conversion and denoising, please wait... ', id = "conversion-info", style={'textAlign': 'center'}), 
+                    html.H5(children = 'Processing files, please wait... ', id = "conversion-info", style={'textAlign': 'center'}),
                     dbc.Progress(id="denoise-progress", animated=True, striped=True, style={"width": "600px"}),
                     html.Br(),
                     html.Br(),
