@@ -7,6 +7,7 @@ Created on Wed Feb  7 11:17:08 2024
 
 import os
 import re
+import sys
 import dash
 import glob
 import json
@@ -31,6 +32,7 @@ import Modules.grouping_tool as gt
 import Modules.cleaning as cleaning
 import Modules.features as features
 import Modules.file_manager as fmanager
+from pathlib import Path
 from Modules import logging_config
 import dash_bootstrap_components as dbc
 from dash.dependencies import MATCH, ALL
@@ -163,6 +165,27 @@ def _launch_external_software(executable_path: str) -> None:
         raise
     except Exception as exc:  # pragma: no cover - defensive
         raise OSError(f"Unable to launch {executable_path}: {exc}") from exc
+
+
+def _open_path_with_default_app(target_path: Path) -> None:
+    """Open a file using the operating system's default application."""
+
+    if hasattr(os, "startfile"):
+        os.startfile(str(target_path))
+        return
+
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(target_path)])
+        return
+
+    subprocess.Popen(["xdg-open", str(target_path)])
+
+
+def _session_log_path() -> Path:
+    """Return the path to the runtime session log file."""
+
+    module_root = Path(logging_config.__file__).resolve().parent
+    return module_root.parent / "log.log"
 
 
 # Definition on main layouts:
@@ -1273,6 +1296,8 @@ def update_conversion_progress(n):
                 completion_message = "Conversion and denoising complete"
             return [separating_line, template_part], progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
         else:
+            separating_line = create_separating_line(line_count)
+            line_count += 1
             list_fail_samples = ', '.join(failure)
             if mzml_alternative:
                 error_info = f'Error happened while denoising: {list_fail_samples}.'
@@ -1280,11 +1305,39 @@ def update_conversion_progress(n):
             else:
                 error_info = f'Error happened while processing: {list_fail_samples}.'
                 completion_message = "Conversion and denoising complete with errors."
-            err = [html.Br(), html.H5(error_info, style={'textAlign': 'center'})]
+            log_help = html.Div(
+                [
+                    html.H5(error_info, style={'textAlign': 'center'}),
+                    html.Br(),
+                    html.P(
+                        "Please review the log file (log.log) to understand the error details, then adjust your configuration "
+                        "and run the pipeline again.",
+                        style={'textAlign': 'center'}
+                    ),
+                    html.Div(
+                        dbc.Button(
+                            "Open log file",
+                            id='open-log-button',
+                            color='danger',
+                            n_clicks=0,
+                        ),
+                        style={'display': 'flex', 'justifyContent': 'center'}
+                    ),
+                    html.Br(),
+                    html.Div(
+                        html.Small(
+                            "Once you have reviewed the log details, please retry the pipeline.",
+                            style={'display': 'block', 'textAlign': 'center'}
+                        )
+                    ),
+                    html.Div(id='log-open-feedback')
+                ]
+            )
+            err = [separating_line, log_help]
             return err, progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
 
 progress = html.Div([
-                html.Div([ 
+                html.Div([
                     html.Br(),
                     html.Br(),
                     html.Br(),
@@ -1302,6 +1355,43 @@ progress = html.Div([
                         }),
                     html.Div(id = 'template-part')
                     ])
+
+
+@callback(
+    Output('log-open-feedback', 'children'),
+    Input('open-log-button', 'n_clicks'),
+    prevent_initial_call=True
+)
+def open_log_file(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+
+    log_path = _session_log_path()
+
+    try:
+        if not log_path.exists():
+            logging_config.configure_logging()
+        _open_path_with_default_app(log_path.resolve())
+        logging_config.log_info(logger, 'Log file opened from error prompt.')
+        return dbc.Alert(
+            [
+                html.Span('Opening the session log. If it does not appear automatically, you can find it here: '),
+                html.Code(str(log_path.resolve()))
+            ],
+            color='info',
+            dismissable=True
+        )
+    except Exception as exc:
+        logging_config.log_exception(logger, 'Unable to open the session log automatically.', exception=exc)
+        return dbc.Alert(
+            [
+                html.Span('Unable to open the session log automatically. Please open it manually at: '),
+                html.Code(str(log_path.resolve()))
+            ],
+            color='danger',
+            dismissable=True
+        )
+
 
 # 8- Load sample template
 ###############################################################################
