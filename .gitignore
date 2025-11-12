@@ -17,6 +17,9 @@ venv/
 /Cache
 /config
 
+# Micromamba
+/micromamba
+
 #Temporary folder
 /tmp
 
@@ -30,6 +33,7 @@ users.json
 # File types
 *.mzML
 *.h5
+*.ini
 *.log
 *.log#
 *.txt
