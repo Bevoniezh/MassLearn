@@ -1096,6 +1096,8 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     setattr(current_project, 'skip_ms_noise', skip_thresholds)
     cache.set('project_loaded', current_project)
 
+    skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
+
     if skip_thresholds:
         logging_config.log_info(logger, 'MS1/MS2 noise thresholds skipped by the user.')
     else:
@@ -1106,10 +1108,29 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
             ms2_value,
         )
 
+    skip_all_processing = skip_thresholds and skip_noise_trace
+
     global_progress = 0
     failure = []
     start_time = None
     estimated_total_time = None
+
+    separating_line = create_separating_line(line_count)
+    line_count += 1
+    new_popup = html.Div(children='', id={"type": "popup", "index": 6}, style={'display': 'none'})
+
+    if skip_all_processing:
+        logging_config.log_info(logger, 'All denoising steps skipped. Skipping mzML processing and moving to the next stage.')
+        global_progress = 100
+        skip_notice = html.Div(
+            dbc.Alert(
+                "All denoising steps were skipped. Existing spectra will be reused without additional processing.",
+                color="info",
+                className="mb-3",
+            ),
+            style={"width": "500px"}
+        )
+        return [separating_line, new_popup, skip_notice, template_part], True, True, 'y'
 
     if mzml_alternative:
         processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
@@ -1117,9 +1138,6 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
         processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
 
     processing_thread.start()
-    separating_line = create_separating_line(line_count)
-    line_count += 1
-    new_popup = html.Div(children='', id={"type": "popup", "index": 6}, style={'display': 'none'})
 
     if skip_thresholds:
         notice = html.Div(
@@ -1541,7 +1559,10 @@ def add_template(template_path):
     global treatment_groups, current_project, tables_list, template_dict, label_tables_list, experiment_titles
     delimiter = detect_delimiter(template_path) # Detect the delimiter
     template = pd.read_csv(template_path, delimiter=delimiter)
-    
+
+    if 'Type_MS' not in template.columns:
+        return False, f'{os.path.basename(template_path)} is missing the Type_MS column.'
+
     # Find ESI mode
     if len(template['Type_MS'].unique()) > 1:
         return False, f'{os.path.basename(template_path)} have at least two different types of MS mode, only one is possible. Verify Type_MS column values. {template["Type_MS"].unique()}'
@@ -1648,7 +1669,14 @@ def validate_template(n_submit_template, stop_add_template_clicks, add_template_
                             template_validity, remark = add_template(file) # add the template(s) in tables_list
                         except Exception as e:
                             template_validity = False
-                            remark = e
+                            logging_config.log_exception(
+                                logger,
+                                'Unable to load template %s while scanning %s.',
+                                file,
+                                template_path,
+                                exception=e,
+                            )
+                            remark = f'Error while loading template: {e}'
                             break
                         if template_validity == False:
                             break
@@ -1661,11 +1689,17 @@ def validate_template(n_submit_template, stop_add_template_clicks, add_template_
                         template_validity, remark = add_template(template_path) # add the template(s) in tables_list
                     except Exception as e:
                         template_validity = False
-                        remark = e
+                        logging_config.log_exception(
+                            logger,
+                            'Unable to load template %s.',
+                            template_path,
+                            exception=e,
+                        )
+                        remark = f'Error while loading template: {e}'
 
             if template_validity: # if oen or all tempalte are valid
                 cache.set('project_loaded', current_project)
-                
+
                 return '', f'{os.path.basename(template_path)} succesfully loaded.', True, None, True, None, None, template_path, 'n'
             else:
                 return '', remark, None, True, None, True, True, template_path, 'n'
