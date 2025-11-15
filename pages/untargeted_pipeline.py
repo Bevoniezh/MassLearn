@@ -1413,40 +1413,51 @@ def update_conversion_progress(n):
             separating_line = create_separating_line(line_count)
             line_count += 1
             list_fail_samples = ', '.join(failure)
+            log_path = _session_log_path().resolve()
+            failure_list = html.Ul(
+                [html.Li(sample) for sample in failure],
+                className='mb-3 text-start d-inline-block',
+            )
             if mzml_alternative:
                 error_info = f'Error happened while denoising: {list_fail_samples}.'
                 completion_message = "Denoising complete with errors."
             else:
                 error_info = f'Error happened while processing: {list_fail_samples}.'
                 completion_message = "Conversion and denoising complete with errors."
-            log_help = html.Div(
-                [
-                    html.H5(error_info, style={'textAlign': 'center'}),
-                    html.Br(),
-                    html.P(
-                        "Please review the log file (log.log) to understand the error details, then adjust your configuration "
-                        "and run the pipeline again.",
-                        style={'textAlign': 'center'}
-                    ),
-                    html.Div(
-                        dbc.Button(
-                            "Open log file",
-                            id='open-log-button',
-                            color='primary',
-                            n_clicks=0,
-                            className='mt-2',
+            log_help = dbc.Card(
+                dbc.CardBody(
+                    [
+                        html.H5(error_info, className='text-center'),
+                        html.Div(
+                            failure_list,
+                            className='d-flex justify-content-center'
                         ),
-                        style={'display': 'flex', 'justifyContent': 'center'}
-                    ),
-                    html.Br(),
-                    html.Div(
+                        html.P(
+                            [
+                                "Please review the session log at ",
+                                html.Code(str(log_path)),
+                                ". Adjust your configuration based on the log details and rerun the pipeline.",
+                            ],
+                            className='text-center'
+                        ),
+                        html.Div(
+                            dbc.Button(
+                                "Open log file",
+                                id='open-log-button',
+                                color='primary',
+                                n_clicks=0,
+                                className='mt-2',
+                            ),
+                            className='d-flex justify-content-center'
+                        ),
                         html.Small(
                             "Once you have reviewed the log details, please retry the pipeline.",
-                            style={'display': 'block', 'textAlign': 'center'}
-                        )
-                    ),
-                    html.Div(id='log-open-feedback')
-                ]
+                            className='d-block text-center mt-3'
+                        ),
+                        html.Div(id='log-open-feedback')
+                    ]
+                ),
+                className='mt-3 shadow-sm'
             )
             err = [separating_line, log_help]
             return err, progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
