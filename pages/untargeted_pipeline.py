@@ -971,7 +971,7 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
                 color="warning",
                 className="mb-3",
             ),
-            style={"width": "400px"}   # or "50%", "30rem", etc.
+            style={"width": "500px"}   # or "50%", "30rem", etc.
         )
         return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
 
@@ -1128,7 +1128,7 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
                 color="warning",
                 className="mb-3",
             ),
-            style={"width": "400px"}   # or "50%", "30rem", etc.
+            style={"width": "500px"}   # or "50%", "30rem", etc.
         )
         return [separating_line, new_popup, notice, progress], True, True, 'y'
 
