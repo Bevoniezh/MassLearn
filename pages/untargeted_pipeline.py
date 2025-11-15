@@ -11,6 +11,7 @@ import sys
 import dash
 import glob
 import json
+import math
 import time
 import uuid
 import random
@@ -33,6 +34,7 @@ import Modules.cleaning as cleaning
 import Modules.features as features
 import Modules.file_manager as fmanager
 from pathlib import Path
+from typing import Dict, List, Optional, Tuple
 from Modules import logging_config
 import dash_bootstrap_components as dbc
 from dash.dependencies import MATCH, ALL
@@ -40,6 +42,7 @@ from dash.exceptions import PreventUpdate
 import networkx.algorithms.community as nx_comm
 from dash.dependencies import Input, Output, State
 from dash import html, dcc, dash_table, callback_context, callback
+import lz4.frame
 
 cache = Cache('./disk_cache')
 
@@ -194,6 +197,242 @@ def _spectra_dicts_from_peaks(spectra: cleaning.Spectra) -> tuple[dict, dict]:
     ms1 = {rt: peaks for rt, peaks in zip(spectra.rt1, spectra.peaks1)}
     ms2 = {rt: peaks for rt, peaks in zip(spectra.rt2, spectra.peaks2)}
     return ms1, ms2
+
+
+def _normalize_sample_name(sample_value) -> str:
+    """Return a normalized sample identifier without the .mzML suffix."""
+
+    if sample_value is None:
+        return ""
+    try:
+        if pd.isna(sample_value):
+            return ""
+    except TypeError:
+        pass
+    sample = str(sample_value).strip()
+    if sample.lower().endswith(".mzml"):
+        sample = sample[:-5]
+    return sample
+
+
+def _coerce_float(value) -> Optional[float]:
+    """Safely convert a value to ``float`` returning ``None`` on failure."""
+
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(numeric):
+        return None
+    return float(numeric)
+
+
+def _coerce_feature_id(value):
+    """Return a numeric feature identifier when possible."""
+
+    numeric = _coerce_float(value)
+    if numeric is None:
+        return None
+    if float(numeric).is_integer():
+        return int(numeric)
+    return numeric
+
+
+def _build_shape_record(row: pd.Series, sample_cache: dict, files_spectra: dict) -> dict:
+    """Construct a chromatographic shape record for a feature row."""
+
+    sample_name = _normalize_sample_name(row.get("sample"))
+    raw_ms_level = row.get("MS_level")
+    if pd.isna(raw_ms_level):
+        ms_level = ""
+    else:
+        ms_level = str(raw_ms_level).strip()
+    ms_index = 1 if "2" in ms_level.lower() else 0
+
+    if sample_name not in sample_cache:
+        sample_cache[sample_name] = files_spectra.get(sample_name)
+    sample_spectra = sample_cache[sample_name]
+
+    rt_start = _coerce_float(row.get("peak_rt_start"))
+    rt_end = _coerce_float(row.get("peak_rt_end"))
+    mz_min = _coerce_float(row.get("peak_mz_min"))
+    mz_max = _coerce_float(row.get("peak_mz_max"))
+
+    rts: List[float] = []
+    intensities: List[float] = []
+    reason = None
+
+    if (
+        sample_spectra
+        and len(sample_spectra) > ms_index
+        and None not in (rt_start, rt_end, mz_min, mz_max)
+    ):
+        spectra_dict = sample_spectra[ms_index] or {}
+        lower_rt = min(rt_start, rt_end)
+        upper_rt = max(rt_start, rt_end)
+        for rt, peaks in spectra_dict.items():
+            if lower_rt <= rt <= upper_rt:
+                array = np.asarray(peaks, dtype=float)
+                if array.size == 0:
+                    intensity = 0.0
+                else:
+                    if array.ndim == 1:
+                        if array.size == 2:
+                            array = array.reshape(1, 2)
+                        else:
+                            continue
+                    if array.ndim != 2 or array.shape[1] < 2:
+                        continue
+                    mask = (array[:, 0] >= mz_min) & (array[:, 0] <= mz_max)
+                    intensity = float(array[mask, 1].sum()) if mask.any() else 0.0
+                rts.append(float(rt))
+                intensities.append(intensity)
+        if rts:
+            paired = sorted(zip(rts, intensities))
+            rts = [round(rt, 6) for rt, _ in paired]
+            intensities = [float(intensity) for _, intensity in paired]
+        else:
+            reason = "no_points"
+    else:
+        if not sample_name or sample_spectra is None:
+            reason = "missing_sample"
+        else:
+            reason = "missing_bounds"
+
+    has_data = bool(rts)
+    if has_data:
+        reason = None
+
+    normalized_level = ms_level.lower()
+    if normalized_level not in {"ms1", "ms2"}:
+        normalized_level = "ms2" if ms_index == 1 else "ms1"
+
+    return {
+        "sample": sample_name,
+        "feature": _coerce_feature_id(row.get("feature")),
+        "ms_level": normalized_level,
+        "rt_window": [rt_start, rt_end] if rt_start is not None and rt_end is not None else None,
+        "mz_window": [mz_min, mz_max] if mz_min is not None and mz_max is not None else None,
+        "shape": [rts, intensities] if has_data else [[], []],
+        "has_data": has_data,
+        "reason": reason,
+    }
+
+
+def _export_feature_shapes(
+    feature_df: pd.DataFrame,
+    output_path: str,
+    project_context,
+):
+    """Export chromatographic traces for each feature and return shape IDs."""
+
+    if feature_df is None or feature_df.empty:
+        return pd.Series(dtype="object"), None
+
+    files_spectra = getattr(current_project, "files_spectra", {}) or {}
+    sample_cache: Dict[str, Optional[Tuple[dict, dict]]] = {}
+    raw_records = []
+    shape_ids: List[Optional[str]] = []
+    shape_counter = 1
+
+    for _, row in feature_df.iterrows():
+        record = _build_shape_record(row, sample_cache, files_spectra)
+        raw_records.append(record)
+        if record["has_data"]:
+            shape_id = f"shape_{shape_counter:07d}"
+            shape_counter += 1
+            record["shape_id"] = shape_id
+            shape_ids.append(shape_id)
+        else:
+            shape_ids.append(None)
+
+    available_records = [rec for rec in raw_records if rec["has_data"]]
+
+    if not available_records:
+        missing_samples = sorted(
+            {
+                rec["sample"]
+                for rec in raw_records
+                if rec.get("reason") == "missing_sample" and rec.get("sample")
+            }
+        )
+        if not files_spectra:
+            logging_config.log_warning(
+                logger,
+                "Chromatographic shape export skipped for project %s because no mzML spectra were cached.",
+                getattr(current_project, "name", "unknown"),
+                project=project_context,
+            )
+        elif missing_samples:
+            logging_config.log_warning(
+                logger,
+                "Chromatographic shape export skipped because cached spectra are missing for samples: %s",
+                ", ".join(missing_samples),
+                project=project_context,
+            )
+        else:
+            logging_config.log_warning(
+                logger,
+                "Chromatographic shape export skipped because no chromatographic points were found within the feature bounds.",
+                project=project_context,
+            )
+        return pd.Series(shape_ids, index=feature_df.index, dtype="object"), None
+
+    try:
+        with lz4.frame.open(output_path, mode="wt", encoding="utf-8") as handle:
+            for record in available_records:
+                serializable = {
+                    key: value
+                    for key, value in record.items()
+                    if key not in {"has_data", "reason"}
+                }
+                handle.write(json.dumps(serializable, separators=(",", ":"), ensure_ascii=False))
+                handle.write("\n")
+    except OSError as exc:
+        logging_config.log_exception(
+            logger,
+            "Failed to write chromatographic shape store to %s",
+            output_path,
+            project=project_context,
+            exception=exc,
+        )
+        return pd.Series(shape_ids, index=feature_df.index, dtype="object"), None
+
+    available_count = len(available_records)
+    missing_bounds = sum(1 for rec in raw_records if rec.get("reason") == "missing_bounds")
+    no_points = sum(1 for rec in raw_records if rec.get("reason") == "no_points")
+    missing_samples = sorted(
+        {
+            rec["sample"]
+            for rec in raw_records
+            if rec.get("reason") == "missing_sample" and rec.get("sample")
+        }
+    )
+
+    logging_config.log_info(
+        logger,
+        "Exported %d chromatographic profiles to %s (missing bounds=%d, empty windows=%d).",
+        available_count,
+        output_path,
+        missing_bounds,
+        no_points,
+        project=project_context,
+    )
+
+    if missing_samples:
+        logging_config.log_warning(
+            logger,
+            "No cached spectra found for samples while building chromatographic shapes: %s",
+            ", ".join(missing_samples),
+            project=project_context,
+        )
+
+    return pd.Series(shape_ids, index=feature_df.index, dtype="object"), output_path
 
 
 # Definition on main layouts:
@@ -2566,17 +2805,7 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     # Apply the function to filter msn_adj based on the presence of features in all_sub
     msn_df_deblanked = msn_df[msn_df.apply(match_in_all_sub, all_sub_df=all_sub_tables, axis=1)]
     msn_df_deblanked_path = os.path.join(current_project.featurepath, current_project.name + '_msn_deblanked.csv')
-    try:
-        msn_df_deblanked.to_csv(msn_df_deblanked_path)
-    except OSError as exc:
-        logging_config.log_exception(
-            logger,
-            "Failed to persist deblanked feature list to %s",
-            msn_df_deblanked_path,
-            project=project_context,
-            exception=exc,
-        )
-        raise
+    shapes_output_path = os.path.join(current_project.featurepath, current_project.name + '_msn_shapes.jsonl.lz4')
 
     label_tables_list = current_project.label_tables_list
     labels_df = pd.DataFrame([
@@ -2588,17 +2817,34 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     msn_df_deblanked['label'] = msn_df_deblanked.groupby('sample')['label'].transform(lambda x: '&&'.join(x.dropna().unique())) # Step 3: Combine labels for each sample
     msn_df_deblanked['label'] = msn_df_deblanked['label'].apply(lambda x: '&&'.join(sorted(set(x.split('&&'))))) # Ensure labels are unique and sorted
     msn_df_deblanked = msn_df_deblanked.drop_duplicates().reset_index(drop=True)
+
+    shape_series, shape_store_path = _export_feature_shapes(
+        msn_df_deblanked,
+        shapes_output_path,
+        project_context,
+    )
+
+    if shape_series.empty and len(msn_df_deblanked) > 0:
+        shape_series = pd.Series([None] * len(msn_df_deblanked), index=msn_df_deblanked.index, dtype="object")
+    else:
+        shape_series = shape_series.reindex(msn_df_deblanked.index, fill_value=None)
+
+    msn_df_deblanked['shape_id'] = shape_series
+
     try:
-        msn_df_deblanked.to_csv(msn_df_deblanked_path)
+        msn_df_deblanked.to_csv(msn_df_deblanked_path, index=False)
     except OSError as exc:
         logging_config.log_exception(
             logger,
-            "Failed to update deblanked feature list at %s",
+            "Failed to persist deblanked feature list to %s",
             msn_df_deblanked_path,
             project=project_context,
             exception=exc,
         )
         raise
+
+    current_project.shape_store_path = shape_store_path
+    current_project.msn_df_deblanked_path = msn_df_deblanked_path
 
     if current_project.meta:
         feature_grouping(msn_df_deblanked, Rt_threshold, Correlation_threshold) # important part, where if multiple template have been treated separately with mzmine, it reasign the features with the sample together based on rt and mz threshold.
