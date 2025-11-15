@@ -965,10 +965,13 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         separating_line = create_separating_line(line_count)
         line_count += 1
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
-        skip_notice = dbc.Alert(
-            'Noise trace removal has been skipped. The pipeline will continue with the existing spectra.',
-            color='warning',
-            className='mt-3',
+        skip_notice = html.Div(
+            dbc.Alert(
+                "Noise trace removal has been skipped. The pipeline will continue with the existing spectra.",
+                color="warning",
+                className="mb-3",
+            ),
+            style={"width": "400px"}   # or "50%", "30rem", etc.
         )
         return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
 
@@ -1119,10 +1122,13 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     new_popup = html.Div(children='', id={"type": "popup", "index": 6}, style={'display': 'none'})
 
     if skip_thresholds:
-        notice = dbc.Alert(
-            'Noise thresholds were skipped. Processing will continue without applying MS1/MS2 noise filters.',
-            color='warning',
-            className='mb-3',
+        notice = html.Div(
+            dbc.Alert(
+                "Noise thresholds were skipped. Processing will continue without applying MS1/MS2 noise filters.",
+                color="warning",
+                className="mb-3",
+            ),
+            style={"width": "400px"}   # or "50%", "30rem", etc.
         )
         return [separating_line, new_popup, notice, progress], True, True, 'y'
 
@@ -1426,7 +1432,7 @@ def update_conversion_progress(n):
                     html.P(
                         "Please review the log file (log.log) to understand the error details, then adjust your configuration "
                         "and run the pipeline again.",
-                        style={'textAlign': 'center'}
+                        style={'textAlign': 'center','maxWidth': '690px'}
                     ),
                     html.Div(
                         dbc.Button(
@@ -1442,7 +1448,7 @@ def update_conversion_progress(n):
                     html.Div(
                         html.Small(
                             "Once you have reviewed the log details, please retry the pipeline.",
-                            style={'display': 'block', 'textAlign': 'center'}
+                            style={'display': 'block', 'textAlign': 'center','maxWidth': '690px'}
                         )
                     ),
                     html.Div(id='log-open-feedback')
