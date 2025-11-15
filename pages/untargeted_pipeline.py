@@ -957,7 +957,7 @@ noise_threshold = html.Div([
                                       maxLength=3,  # Limit input to 3 characters
                                       size="sm"),  # Set the size of the input
                             dbc.InputGroupText("%"),  # Adding "%" at the end of the input bar
-                                ], style={'maxWidth': '350px'}),
+                                ], style={'maxWidth': '450px'}),
                         html.Br(),
                         dbc.Button("Confirm noise trace", id = "noise-trace-button", color="primary", n_clicks=0),
                         dbc.Tooltip(
@@ -1045,7 +1045,7 @@ ms_noise = html.Div([
                                   step=1,   # Increment step
                                   size="sm"),  # Set the size of the input
                         dbc.InputGroupText("ions"),  # Adding "%" at the end of the input bar
-                            ], style={'maxWidth': '490px'}),
+                            ], style={'maxWidth': '690px'}),
                     html.Br(),
                     dbc.InputGroup([ 
                         dbc.InputGroupText("MS level 2 minimum intensity detectable"),  # Adding a label
@@ -1056,7 +1056,7 @@ ms_noise = html.Div([
                                   step=1,   # Increment step
                                   size="sm"),  # Set the size of the input
                         dbc.InputGroupText("ions"),  # Adding "%" at the end of the input bar
-                            ], style={'maxWidth': '490px'}),
+                            ], style={'maxWidth': '690px'}),
                     html.Br(),
                     dbc.Button("Begin processing", id = "ms-noise-button", color="primary", n_clicks=0),
                     dbc.Tooltip(
