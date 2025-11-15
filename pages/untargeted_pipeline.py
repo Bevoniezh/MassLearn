@@ -35,6 +35,13 @@ import Modules.features as features
 import Modules.file_manager as fmanager
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+
+SpectraIndex = Optional[
+    Tuple[
+        Optional[Tuple[np.ndarray, List[np.ndarray]]],
+        Optional[Tuple[np.ndarray, List[np.ndarray]]],
+    ]
+]
 from Modules import logging_config
 import dash_bootstrap_components as dbc
 from dash.dependencies import MATCH, ALL
@@ -243,6 +250,56 @@ def _coerce_feature_id(value):
     return numeric
 
 
+def _prepare_spectra_index(sample_entry: Optional[Tuple[Optional[dict], Optional[dict]]]) -> SpectraIndex:
+    """Return per-level sorted RT indices for fast chromatogram slicing."""
+
+    if not sample_entry:
+        return None
+
+    prepared_levels: List[Optional[Tuple[np.ndarray, List[np.ndarray]]]] = []
+
+    for level_dict in sample_entry:
+        if not level_dict:
+            prepared_levels.append(None)
+            continue
+
+        try:
+            sorted_items = sorted(
+                ((float(rt), peaks) for rt, peaks in level_dict.items()),
+                key=lambda item: item[0],
+            )
+        except Exception:
+            prepared_levels.append(None)
+            continue
+
+        if not sorted_items:
+            prepared_levels.append((np.empty(0, dtype=float), []))
+            continue
+
+        rt_values = np.fromiter((rt for rt, _ in sorted_items), dtype=float)
+        spectra_arrays: List[np.ndarray] = []
+
+        for _, peaks in sorted_items:
+            array = np.asarray(peaks, dtype=float)
+            if array.size == 0:
+                spectra_arrays.append(np.empty((0, 2), dtype=float))
+                continue
+            if array.ndim == 1:
+                if array.size == 2:
+                    array = array.reshape(1, 2)
+                else:
+                    spectra_arrays.append(np.empty((0, 2), dtype=float))
+                    continue
+            if array.ndim != 2 or array.shape[1] < 2:
+                spectra_arrays.append(np.empty((0, 2), dtype=float))
+                continue
+            spectra_arrays.append(array)
+
+        prepared_levels.append((rt_values, spectra_arrays))
+
+    return tuple(prepared_levels)
+
+
 def _build_shape_record(row: pd.Series, sample_cache: dict, files_spectra: dict) -> dict:
     """Construct a chromatographic shape record for a feature row."""
 
@@ -255,7 +312,7 @@ def _build_shape_record(row: pd.Series, sample_cache: dict, files_spectra: dict)
     ms_index = 1 if "2" in ms_level.lower() else 0
 
     if sample_name not in sample_cache:
-        sample_cache[sample_name] = files_spectra.get(sample_name)
+        sample_cache[sample_name] = _prepare_spectra_index(files_spectra.get(sample_name))
     sample_spectra = sample_cache[sample_name]
 
     rt_start = _coerce_float(row.get("peak_rt_start"))
@@ -270,24 +327,23 @@ def _build_shape_record(row: pd.Series, sample_cache: dict, files_spectra: dict)
     if (
         sample_spectra
         and len(sample_spectra) > ms_index
+        and sample_spectra[ms_index] is not None
         and None not in (rt_start, rt_end, mz_min, mz_max)
     ):
-        spectra_dict = sample_spectra[ms_index] or {}
-        lower_rt = min(rt_start, rt_end)
-        upper_rt = max(rt_start, rt_end)
-        for rt, peaks in spectra_dict.items():
-            if lower_rt <= rt <= upper_rt:
-                array = np.asarray(peaks, dtype=float)
+        rt_values, spectra_arrays = sample_spectra[ms_index]
+        if rt_values.size:
+            lower_rt = min(rt_start, rt_end)
+            upper_rt = max(rt_start, rt_end)
+            start_idx = int(np.searchsorted(rt_values, lower_rt, side="left"))
+            end_idx = int(np.searchsorted(rt_values, upper_rt, side="right"))
+            for idx in range(start_idx, end_idx):
+                rt = rt_values[idx]
+                if rt < lower_rt or rt > upper_rt:
+                    continue
+                array = spectra_arrays[idx]
                 if array.size == 0:
                     intensity = 0.0
                 else:
-                    if array.ndim == 1:
-                        if array.size == 2:
-                            array = array.reshape(1, 2)
-                        else:
-                            continue
-                    if array.ndim != 2 or array.shape[1] < 2:
-                        continue
                     mask = (array[:, 0] >= mz_min) & (array[:, 0] <= mz_max)
                     intensity = float(array[mask, 1].sum()) if mask.any() else 0.0
                 rts.append(float(rt))
@@ -335,7 +391,15 @@ def _export_feature_shapes(
         return pd.Series(dtype="object"), None
 
     files_spectra = getattr(current_project, "files_spectra", {}) or {}
-    sample_cache: Dict[str, Optional[Tuple[dict, dict]]] = {}
+
+    logging_config.log_info(
+        logger,
+        "Preparing chromatographic shape export for %d features (samples with spectra=%d).",
+        len(feature_df),
+        len(files_spectra),
+        project=project_context,
+    )
+    sample_cache: Dict[str, SpectraIndex] = {}
     raw_records = []
     shape_ids: List[Optional[str]] = []
     shape_counter = 1
