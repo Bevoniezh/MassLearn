@@ -7,6 +7,7 @@ Created on Wed Feb  7 11:17:08 2024
 
 import os
 import re
+import sys
 import dash
 import glob
 import json
@@ -31,6 +32,7 @@ import Modules.grouping_tool as gt
 import Modules.cleaning as cleaning
 import Modules.features as features
 import Modules.file_manager as fmanager
+from pathlib import Path
 from Modules import logging_config
 import dash_bootstrap_components as dbc
 from dash.dependencies import MATCH, ALL
@@ -163,6 +165,35 @@ def _launch_external_software(executable_path: str) -> None:
         raise
     except Exception as exc:  # pragma: no cover - defensive
         raise OSError(f"Unable to launch {executable_path}: {exc}") from exc
+
+
+def _open_path_with_default_app(target_path: Path) -> None:
+    """Open a file using the operating system's default application."""
+
+    if hasattr(os, "startfile"):
+        os.startfile(str(target_path))
+        return
+
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(target_path)])
+        return
+
+    subprocess.Popen(["xdg-open", str(target_path)])
+
+
+def _session_log_path() -> Path:
+    """Return the path to the runtime session log file."""
+
+    module_root = Path(logging_config.__file__).resolve().parent
+    return module_root.parent / "log.log"
+
+
+def _spectra_dicts_from_peaks(spectra: cleaning.Spectra) -> tuple[dict, dict]:
+    """Build MS1/MS2 spectra dictionaries from extracted peak arrays."""
+
+    ms1 = {rt: peaks for rt, peaks in zip(spectra.rt1, spectra.peaks1)}
+    ms2 = {rt: peaks for rt, peaks in zip(spectra.rt2, spectra.peaks2)}
+    return ms1, ms2
 
 
 # Definition on main layouts:
@@ -909,26 +940,49 @@ convert_raw = html.Div([
 @callback(
     [Output('ms-noise', 'children'),
      Output('noise-trace-button', 'disabled'),
+     Output('skip-noise-trace-button', 'disabled'),
      Output({'type': 'popup', 'index': 4}, 'children')
      ],
-    [Input("noise-trace-button", "n_clicks")],
-    [State("noise-threshold", "value")],
-    prevent_initial_call = True
-)                        
-def validate_noise_raw_input(n_clicks, threshold):
+    [Input('noise-trace-button', 'n_clicks'),
+     Input('skip-noise-trace-button', 'n_clicks')],
+    [State('noise-threshold', 'value')],
+    prevent_initial_call=True
+)
+def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
     global current_project, line_count
-    if n_clicks:
-        if 0 < threshold < 101:
-            current_project.noise_trace_threshold = threshold
-            cache.set('project_loaded', current_project)
 
-            logging_config.log_info(logger, 'Noise trace threshold: %s', threshold)
-            separating_line = create_separating_line(line_count)
-            line_count += 1
-            new_popup = html.Div(children = '', id={"type": "popup", "index": 5}, style={'display': 'none'})
-            return [separating_line, new_popup, ms_noise], True, 'y'
-        else:
-            raise PreventUpdate()
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate()
+
+    triggered = ctx.triggered_id
+
+    if triggered == 'skip-noise-trace-button':
+        current_project.noise_trace_threshold = None
+        setattr(current_project, 'skip_noise_trace', True)
+        cache.set('project_loaded', current_project)
+        logging_config.log_info(logger, 'Noise trace removal skipped by the user.')
+        separating_line = create_separating_line(line_count)
+        line_count += 1
+        new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
+        skip_notice = dbc.Alert(
+            'Noise trace removal has been skipped. The pipeline will continue with the existing spectra.',
+            color='warning',
+            className='mt-3',
+        )
+        return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
+
+    if confirm_clicks and 0 < threshold < 101:
+        current_project.noise_trace_threshold = threshold
+        setattr(current_project, 'skip_noise_trace', False)
+        cache.set('project_loaded', current_project)
+
+        logging_config.log_info(logger, 'Noise trace threshold: %s', threshold)
+        separating_line = create_separating_line(line_count)
+        line_count += 1
+        new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
+        return [separating_line, new_popup, ms_noise], True, True, 'y'
+
     raise PreventUpdate()
 
 noise_threshold = html.Div([ 
@@ -959,7 +1013,25 @@ noise_threshold = html.Div([
                             dbc.InputGroupText("%"),  # Adding "%" at the end of the input bar
                                 ], style={'maxWidth': '350px'}),
                         html.Br(),
-                        dbc.Button("Confirm noise trace", id = "noise-trace-button", color="primary", n_clicks=0),
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    "Confirm noise trace",
+                                    id="noise-trace-button",
+                                    color="primary",
+                                    n_clicks=0,
+                                ),
+                                dbc.Button(
+                                    "Skip noise trace removal",
+                                    id="skip-noise-trace-button",
+                                    color="secondary",
+                                    outline=True,
+                                    n_clicks=0,
+                                    className="ms-2",
+                                ),
+                            ],
+                            className="d-flex justify-content-center",
+                        ),
                         dbc.Tooltip(
                             "If a m/z (+- 0.005 Da) is detected > Threshold % of the whole elution time range, this m/z (+- 0.005 Da) is deleted).",
                             target="noise-threshold",  # ID of the component to which the tooltip is attached
@@ -978,55 +1050,83 @@ noise_threshold = html.Div([
 @callback(
     [Output('conversion-progress-part', 'children'),
      Output('ms-noise-button', 'disabled'),
+     Output('skip-ms-noise-button', 'disabled'),
      Output({'type': 'popup', 'index': 5}, 'children')
      ],
-    [Input("ms-noise-button", "n_clicks")],
-    [State("ms1-noise", "value"),
-     State("ms2-noise", "value")],
-    prevent_initial_call = True
+    [Input('ms-noise-button', 'n_clicks'),
+     Input('skip-ms-noise-button', 'n_clicks')],
+    [State('ms1-noise', 'value'),
+     State('ms2-noise', 'value')],
+    prevent_initial_call=True
 )
-def validate_ms_noise_input(n_clicks, ms1, ms2):
+def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
-    if n_clicks:
-        if 0 <= ms1 and 0 <= ms2:
-            if not mzml_alternative:
-                try:
-                    proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
-                except SoftwarePathError as exc:
-                    logging_config.log_warning(logger, str(exc))
-                    warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
-                    return warning, False, 'n'
-            else:
-                proteowizard_path = None
 
-            current_project.ms1_noise = ms1
-            current_project.ms2_noise = ms2
-            cache.set('project_loaded', current_project)
-            logging_config.log_info(
-                logger,
-                'ms1 noise threshold: %s and ms2 noise threshold: %s',
-                ms1,
-                ms2,
-            )
+    ctx = callback_context
+    if not ctx.triggered:
+        raise PreventUpdate()
 
-            global_progress = 0
-            failure = []
-            start_time = None
-            estimated_total_time = None
+    triggered = ctx.triggered_id
+    skip_thresholds = triggered == 'skip-ms-noise-button'
 
-            if mzml_alternative:
-                processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
-            else:
-                processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
-
-            processing_thread.start()
-            separating_line = create_separating_line(line_count)
-            line_count += 1
-            new_popup = html.Div(children = '', id={"type": "popup", "index": 6}, style={'display': 'none'})
-            return [separating_line, new_popup, progress], True, 'y'
-        else:
+    if skip_thresholds:
+        ms1_value = 0
+        ms2_value = 0
+    else:
+        if not confirm_clicks or ms1 is None or ms2 is None or ms1 < 0 or ms2 < 0:
             raise PreventUpdate()
-    raise PreventUpdate()
+        ms1_value = ms1
+        ms2_value = ms2
+
+    if not mzml_alternative:
+        try:
+            proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+        except SoftwarePathError as exc:
+            logging_config.log_warning(logger, str(exc))
+            warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+            return warning, False, False, 'n'
+    else:
+        proteowizard_path = None
+
+    current_project.ms1_noise = ms1_value
+    current_project.ms2_noise = ms2_value
+    setattr(current_project, 'skip_ms_noise', skip_thresholds)
+    cache.set('project_loaded', current_project)
+
+    if skip_thresholds:
+        logging_config.log_info(logger, 'MS1/MS2 noise thresholds skipped by the user.')
+    else:
+        logging_config.log_info(
+            logger,
+            'ms1 noise threshold: %s and ms2 noise threshold: %s',
+            ms1_value,
+            ms2_value,
+        )
+
+    global_progress = 0
+    failure = []
+    start_time = None
+    estimated_total_time = None
+
+    if mzml_alternative:
+        processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
+    else:
+        processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
+
+    processing_thread.start()
+    separating_line = create_separating_line(line_count)
+    line_count += 1
+    new_popup = html.Div(children='', id={"type": "popup", "index": 6}, style={'display': 'none'})
+
+    if skip_thresholds:
+        notice = dbc.Alert(
+            'Noise thresholds were skipped. Processing will continue without applying MS1/MS2 noise filters.',
+            color='warning',
+            className='mb-3',
+        )
+        return [separating_line, new_popup, notice, progress], True, True, 'y'
+
+    return [separating_line, new_popup, progress], True, True, 'y'
 ms_noise = html.Div([ 
                 html.Div([        
                     dbc.ListGroupItem("""For convenience, all masses with an intensity (or count) lower than 400 for MS1 and 200 for MS2 will be removed by default. \
@@ -1058,7 +1158,25 @@ ms_noise = html.Div([
                         dbc.InputGroupText("ions"),  # Adding "%" at the end of the input bar
                             ], style={'maxWidth': '490px'}),
                     html.Br(),
-                    dbc.Button("Begin processing", id = "ms-noise-button", color="primary", n_clicks=0),
+                    html.Div(
+                        [
+                            dbc.Button(
+                                "Begin processing",
+                                id="ms-noise-button",
+                                color="primary",
+                                n_clicks=0,
+                            ),
+                            dbc.Button(
+                                "Skip noise thresholds",
+                                id="skip-ms-noise-button",
+                                color="secondary",
+                                outline=True,
+                                n_clicks=0,
+                                className="ms-2",
+                            ),
+                        ],
+                        className="d-flex justify-content-center",
+                    ),
                     dbc.Tooltip(
                         "Below this limit of ion count, all signal from MS level 1 (mostly potential precursor ions) detected by the Mass Spectrometer will be removed natively from the files.",
                         target='ms1-noise',  # ID of the component to which the tooltip is attached
@@ -1131,12 +1249,19 @@ def process_files(files, proteowizard_path):
                 # Denoise the file
                 spectra = cleaning.Spectra(rawfolder_mzmlfile_path) # take all the spectra data
                 spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise) # peak variable is only here to allow loading bar to not be disturbe
-                to_denoise_file = cleaning.Denoise(rawfolder_mzmlfile_path, current_project.featurepath)
-                denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
-                    spectra,
-                    current_project.noise_trace_threshold,
-                    Dash_app=True,
-                ) # denoised_spectra is the spectra class object from cleaning module, containing lots of attributes. Encoded are just variables with basice array denoised
+
+                skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
+
+                if skip_noise_trace:
+                    ms1_spectra, ms2_spectra = _spectra_dicts_from_peaks(spectra)
+                else:
+                    to_denoise_file = cleaning.Denoise(rawfolder_mzmlfile_path, current_project.featurepath)
+                    denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
+                        spectra,
+                        current_project.noise_trace_threshold,
+                        Dash_app=True,
+                    ) # denoised_spectra is the spectra class object from cleaning module, containing lots of attributes. Encoded are just variables with basice array denoised
+
                 current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra ##### Important: here you find the spectra files, use it to plot the features
                 # Move and delete the files
                 if os.path.exists(mzmlfolder_mzmlfile_path):
@@ -1147,7 +1272,10 @@ def process_files(files, proteowizard_path):
                 if os.path.exists(rawfolder_mzmlfile_path):
                     os.remove(rawfolder_mzmlfile_path)
 
-                logging_config.log_info(logger, '%s converted and denoised.', sample_name)
+                if skip_noise_trace:
+                    logging_config.log_info(logger, '%s converted without noise trace removal.', sample_name)
+                else:
+                    logging_config.log_info(logger, '%s converted and denoised.', sample_name)
         except Exception as exc:
             rawfile_path = file
             rawfile_path_noext, _ = os.path.splitext(file)
@@ -1199,15 +1327,24 @@ def process_mzml_files(files):
         try:
             spectra = cleaning.Spectra(file)
             spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise)
-            to_denoise_file = cleaning.Denoise(file, current_project.featurepath)
-            denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
-                spectra,
-                current_project.noise_trace_threshold,
-                Dash_app=True,
-            )
+
+            skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
+
+            if skip_noise_trace:
+                ms1_spectra, ms2_spectra = _spectra_dicts_from_peaks(spectra)
+            else:
+                to_denoise_file = cleaning.Denoise(file, current_project.featurepath)
+                denoised_spectra, ms1_spectra, ms2_spectra = to_denoise_file.filtering(
+                    spectra,
+                    current_project.noise_trace_threshold,
+                    Dash_app=True,
+                )
             current_project.sample_names.append(sample_name)
             current_project.files_spectra[sample_name] = ms1_spectra, ms2_spectra
-            logging_config.log_info(logger, '%s denoised.', sample_name)
+            if skip_noise_trace:
+                logging_config.log_info(logger, '%s processed without noise trace removal.', sample_name)
+            else:
+                logging_config.log_info(logger, '%s denoised.', sample_name)
         except Exception:
             logging_config.log_error(logger, '%s denoising failure.', sample_name)
             print(f'{sample_name} denoising failure.')
@@ -1273,6 +1410,8 @@ def update_conversion_progress(n):
                 completion_message = "Conversion and denoising complete"
             return [separating_line, template_part], progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
         else:
+            separating_line = create_separating_line(line_count)
+            line_count += 1
             list_fail_samples = ', '.join(failure)
             if mzml_alternative:
                 error_info = f'Error happened while denoising: {list_fail_samples}.'
@@ -1280,11 +1419,40 @@ def update_conversion_progress(n):
             else:
                 error_info = f'Error happened while processing: {list_fail_samples}.'
                 completion_message = "Conversion and denoising complete with errors."
-            err = [html.Br(), html.H5(error_info, style={'textAlign': 'center'})]
+            log_help = html.Div(
+                [
+                    html.H5(error_info, style={'textAlign': 'center'}),
+                    html.Br(),
+                    html.P(
+                        "Please review the log file (log.log) to understand the error details, then adjust your configuration "
+                        "and run the pipeline again.",
+                        style={'textAlign': 'center'}
+                    ),
+                    html.Div(
+                        dbc.Button(
+                            "Open log file",
+                            id='open-log-button',
+                            color='primary',
+                            n_clicks=0,
+                            className='mt-2',
+                        ),
+                        style={'display': 'flex', 'justifyContent': 'center'}
+                    ),
+                    html.Br(),
+                    html.Div(
+                        html.Small(
+                            "Once you have reviewed the log details, please retry the pipeline.",
+                            style={'display': 'block', 'textAlign': 'center'}
+                        )
+                    ),
+                    html.Div(id='log-open-feedback')
+                ]
+            )
+            err = [separating_line, log_help]
             return err, progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
 
 progress = html.Div([
-                html.Div([ 
+                html.Div([
                     html.Br(),
                     html.Br(),
                     html.Br(),
@@ -1302,6 +1470,43 @@ progress = html.Div([
                         }),
                     html.Div(id = 'template-part')
                     ])
+
+
+@callback(
+    Output('log-open-feedback', 'children'),
+    Input('open-log-button', 'n_clicks'),
+    prevent_initial_call=True
+)
+def open_log_file(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate
+
+    log_path = _session_log_path()
+
+    try:
+        if not log_path.exists():
+            logging_config.configure_logging()
+        _open_path_with_default_app(log_path.resolve())
+        logging_config.log_info(logger, 'Log file opened from error prompt.')
+        return dbc.Alert(
+            [
+                html.Span('Opening the session log. If it does not appear automatically, you can find it here: '),
+                html.Code(str(log_path.resolve()))
+            ],
+            color='info',
+            dismissable=True
+        )
+    except Exception as exc:
+        logging_config.log_exception(logger, 'Unable to open the session log automatically.', exception=exc)
+        return dbc.Alert(
+            [
+                html.Span('Unable to open the session log automatically. Please open it manually at: '),
+                html.Code(str(log_path.resolve()))
+            ],
+            color='danger',
+            dismissable=True
+        )
+
 
 # 8- Load sample template
 ###############################################################################
