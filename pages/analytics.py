@@ -2808,7 +2808,17 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
         updating = True
         # Recreate the network graph based on new threshold values
         G.clear()  # Reset the graph
-        minimum_ratio_threshold = 1 - (3/len(project_loaded.sample_names)) # 0.7 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more sampels in an experiment, the higher this threshold to avoid chained wrong corrrelation 
+        sample_count = len(project_loaded.sample_names)
+        if sample_count == 0:
+            # Fall back to the intensity columns present on the preprocessed dataframe (m/z and rt are metadata)
+            sample_count = max(0, len(preprocessed_df.columns) - 2)
+        if sample_count == 0:
+            logging.warning("No samples detected on project %s; disabling shared-coverage ratio threshold", project_loaded.project_name)
+            minimum_ratio_threshold = 0.0
+        else:
+            minimum_ratio_threshold = 1 - (3 / sample_count)
+            minimum_ratio_threshold = max(0.0, min(1.0, minimum_ratio_threshold))
+        # 0.7 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more samples in an experiment, the higher this threshold to avoid chained wrong correlation
         
         # Define the RT similarity threshold. For each feature, find other features within the RT threshold
         similar_rt_groups = {}
