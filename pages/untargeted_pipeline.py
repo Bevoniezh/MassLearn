@@ -34,7 +34,7 @@ import Modules.cleaning as cleaning
 import Modules.features as features
 import Modules.file_manager as fmanager
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 SpectraIndex = Optional[
     Tuple[
@@ -250,15 +250,85 @@ def _coerce_feature_id(value):
     return numeric
 
 
-def _prepare_spectra_index(sample_entry: Optional[Tuple[Optional[dict], Optional[dict]]]) -> SpectraIndex:
-    """Return per-level sorted RT indices for fast chromatogram slicing."""
+def _extract_level_dict(candidate: Any) -> Optional[dict]:
+    """Return a dictionary mapping RT to spectra if ``candidate`` matches the structure."""
+
+    if not candidate:
+        return None
+
+    if isinstance(candidate, dict):
+        return candidate if candidate else None
+
+    return None
+
+
+def _normalize_spectra_levels(
+    sample_entry: Optional[Any],
+) -> Optional[Tuple[Optional[dict], Optional[dict]]]:
+    """Normalize the stored spectra entry so both MS levels can be indexed consistently."""
 
     if not sample_entry:
         return None
 
+    # Files can store spectra either as a tuple ``(ms1_dict, ms2_dict)`` or as a
+    # mapping with explicit keys. Accept both layouts so older projects remain
+    # compatible with the new exporter.
+    if isinstance(sample_entry, (list, tuple)):
+        first = _extract_level_dict(sample_entry[0]) if len(sample_entry) > 0 else None
+        second = _extract_level_dict(sample_entry[1]) if len(sample_entry) > 1 else None
+        return first, second
+
+    if isinstance(sample_entry, dict):
+        key_map = {
+            "ms1": None,
+            "MS1": None,
+            "1": None,
+            1: None,
+            "level1": None,
+            "Level1": None,
+            "ms2": None,
+            "MS2": None,
+            "2": None,
+            2: None,
+            "level2": None,
+            "Level2": None,
+        }
+        normalized = {}
+        for key, value in sample_entry.items():
+            if key in key_map:
+                normalized[key] = _extract_level_dict(value)
+
+        ms1 = normalized.get("ms1") or normalized.get("MS1") or normalized.get("1") or normalized.get(1) or normalized.get(
+            "level1"
+        ) or normalized.get("Level1")
+        ms2 = normalized.get("ms2") or normalized.get("MS2") or normalized.get("2") or normalized.get(2) or normalized.get(
+            "level2"
+        ) or normalized.get("Level2")
+
+        if ms1 is None and ms2 is None:
+            # Fallback: keep the first two dictionary-like values when the keys
+            # are unknown but the shape matches what we expect.
+            dict_values = [val for val in sample_entry.values() if isinstance(val, dict)]
+            if dict_values:
+                ms1 = dict_values[0]
+            if len(dict_values) > 1:
+                ms2 = dict_values[1]
+
+        return ms1, ms2
+
+    return None
+
+
+def _prepare_spectra_index(sample_entry: Optional[Tuple[Optional[dict], Optional[dict]]]) -> SpectraIndex:
+    """Return per-level sorted RT indices for fast chromatogram slicing."""
+
+    normalized_entry = _normalize_spectra_levels(sample_entry)
+    if not normalized_entry:
+        return None
+
     prepared_levels: List[Optional[Tuple[np.ndarray, List[np.ndarray]]]] = []
 
-    for level_dict in sample_entry:
+    for level_dict in normalized_entry:
         if not level_dict:
             prepared_levels.append(None)
             continue
@@ -311,9 +381,9 @@ def _build_shape_record(row: pd.Series, sample_cache: dict, files_spectra: dict)
         ms_level = str(raw_ms_level).strip()
     ms_index = 1 if "2" in ms_level.lower() else 0
 
-    if sample_name not in sample_cache:
+    if sample_name and sample_name not in sample_cache:
         sample_cache[sample_name] = _prepare_spectra_index(files_spectra.get(sample_name))
-    sample_spectra = sample_cache[sample_name]
+    sample_spectra = sample_cache.get(sample_name) if sample_name else None
 
     rt_start = _coerce_float(row.get("peak_rt_start"))
     rt_end = _coerce_float(row.get("peak_rt_end"))
