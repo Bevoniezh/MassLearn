@@ -16,11 +16,13 @@ import re
 import json
 import dash
 import scipy
+import logging
 import warnings
 import itertools
 import threading
 import scipy.stats
 from typing import Dict, List, Optional
+from contextlib import contextmanager
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -43,6 +45,10 @@ from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from dash import html, dcc, dash_table, callback_context, callback
 import lz4.frame
+
+from Modules import logging_config
+
+logger = logging.getLogger(__name__)
 
 cache = Cache('./disk_cache')
 
@@ -410,6 +416,41 @@ treatment_selection = None
 updating = False
 validity = False
 volcano_feature_groups = None
+
+
+def _active_project_name() -> Optional[str]:
+    if project_loaded is None:
+        return None
+    return getattr(project_loaded, 'project_name', getattr(project_loaded, 'name', None))
+
+
+@contextmanager
+def _feature_grouping_step_logger(step_name: str):
+    project_name = _active_project_name()
+    logging_config.log_info(
+        logger,
+        "Feature grouping step started: %s",
+        step_name,
+        project=project_name,
+    )
+    try:
+        yield
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging_config.log_exception(
+            logger,
+            "Feature grouping step failed: %s",
+            step_name,
+            project=project_name,
+            exception=exc,
+        )
+        raise
+    else:
+        logging_config.log_info(
+            logger,
+            "Feature grouping step completed: %s",
+            step_name,
+            project=project_name,
+        )
 
 
 def _shape_payload_to_vector(shape_payload) -> Optional[np.ndarray]:
@@ -2713,6 +2754,14 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
     if threshold <= 0 or not feature_shape_vectors:
         return [set(component_nodes)]
     nodes = set(component_nodes)
+    project_name = _active_project_name()
+    logging_config.log_info(
+        logger,
+        "Shape refinement started for component (%s nodes, threshold=%.2f)",
+        len(nodes),
+        threshold,
+        project=project_name,
+    )
     available = []
     missing = []
     for node in nodes:
@@ -2722,36 +2771,65 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
         else:
             available.append((node, vector))
     if len(available) < 2:
+        logging_config.log_info(
+            logger,
+            "Shape refinement skipped for component (%s nodes) due to insufficient vectors",
+            len(nodes),
+            project=project_name,
+        )
         return [set(nodes)]
-    H = nx.Graph()
-    H.add_nodes_from(node for node, _ in available)
-    for idx, (node_i, vec_i) in enumerate(available):
-        for jdx in range(idx + 1, len(available)):
-            node_j, vec_j = available[jdx]
-            norm_i = np.linalg.norm(vec_i)
-            norm_j = np.linalg.norm(vec_j)
-            if norm_i == 0 or norm_j == 0:
-                continue
-            similarity = float(np.dot(vec_i, vec_j) / (norm_i * norm_j))
-            if similarity >= threshold:
-                H.add_edge(node_i, node_j, weight=similarity)
-    shape_components = [set(comp) for comp in nx.connected_components(H)]
-    if len(shape_components) <= 1:
+    try:
+        H = nx.Graph()
+        H.add_nodes_from(node for node, _ in available)
+        for idx, (node_i, vec_i) in enumerate(available):
+            for jdx in range(idx + 1, len(available)):
+                node_j, vec_j = available[jdx]
+                norm_i = np.linalg.norm(vec_i)
+                norm_j = np.linalg.norm(vec_j)
+                if norm_i == 0 or norm_j == 0:
+                    continue
+                similarity = float(np.dot(vec_i, vec_j) / (norm_i * norm_j))
+                if similarity >= threshold:
+                    H.add_edge(node_i, node_j, weight=similarity)
+        shape_components = [set(comp) for comp in nx.connected_components(H)]
+        if len(shape_components) <= 1:
+            logging_config.log_info(
+                logger,
+                "Shape refinement produced a single subset for component (%s nodes)",
+                len(nodes),
+                project=project_name,
+            )
+            return [set(nodes)]
+        for node in missing:
+            neighbors = set(graph.neighbors(node)).intersection(nodes)
+            if neighbors:
+                best_idx = 0
+                best_overlap = -1
+                for idx, comp in enumerate(shape_components):
+                    overlap = len(neighbors & comp)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_idx = idx
+                shape_components[best_idx].add(node)
+            else:
+                shape_components[0].add(node)
+        logging_config.log_info(
+            logger,
+            "Shape refinement completed for component (%s nodes) with %s refined groups",
+            len(nodes),
+            len(shape_components),
+            project=project_name,
+        )
+        return shape_components
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging_config.log_exception(
+            logger,
+            "Shape refinement failed for component (%s nodes)",
+            len(nodes),
+            project=project_name,
+            exception=exc,
+        )
         return [set(nodes)]
-    for node in missing:
-        neighbors = set(graph.neighbors(node)).intersection(nodes)
-        if neighbors:
-            best_idx = 0
-            best_overlap = -1
-            for idx, comp in enumerate(shape_components):
-                overlap = len(neighbors & comp)
-                if overlap > best_overlap:
-                    best_overlap = overlap
-                    best_idx = idx
-            shape_components[best_idx].add(node)
-        else:
-            shape_components[0].add(node)
-    return shape_components
 
 # Callback for updating the network graph
 @callback(
@@ -2806,6 +2884,15 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     
     if button_id == 'update-button' and not (project_loaded.meta == True):
         updating = True
+        project_name = _active_project_name()
+        logging_config.log_info(
+            logger,
+            "Feature grouping update requested (RT=%.2f, Corr=%.2f, Shape=%.2f)",
+            Rt_threshold,
+            Correlation_threshold,
+            Shape_threshold,
+            project=project_name,
+        )
         # Recreate the network graph based on new threshold values
         G.clear()  # Reset the graph
         sample_count = len(project_loaded.sample_names)
@@ -2820,137 +2907,121 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
             minimum_ratio_threshold = max(0.0, min(1.0, minimum_ratio_threshold))
         # 0.7 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more samples in an experiment, the higher this threshold to avoid chained wrong correlation
         
-        # Define the RT similarity threshold. For each feature, find other features within the RT threshold
-        similar_rt_groups = {}
-        for feature in preprocessed_df.index:
-            rt = preprocessed_df.loc[feature, 'rt']
-            similar_features = preprocessed_df[np.abs(preprocessed_df['rt'] - rt) <= Rt_threshold].index.tolist()
-            similar_rt_groups[feature] = similar_features
-            
-        # Adjsut the similar rt grouping, to keep only the the group with high sized, to avoid a fature to make a false positive correlation between two relevant feature groups
-        unique_lists = list({tuple(v) for v in similar_rt_groups.values()})
-        unique_lists = [list(t) for t in unique_lists]
-        similar_rt_groups_adjusted = {}
-        for feature in preprocessed_df.index:
-            similar_rt_groups_adjusted[feature] = max((lst for lst in unique_lists if feature in lst), key=len, default=[]) # take only the biggest clusters of rt for a feature, to avoid that in-between feature groupfeature goes for false correlation of feature group
-        
-        all_pairs_possible = [(feature, other_feature) for feature, group in similar_rt_groups_adjusted.items() for other_feature in group if feature < other_feature]
-        pairs_df = pd.DataFrame(all_pairs_possible)
-        pairs_df.columns = ['feature', 'other_feature']
-        rt_values = preprocessed_df.loc[:,'rt']
-        pairs_time_difference = np.abs(rt_values.values[:, None] - rt_values.values[None, :]) # absolute tome difference between eahc pair of feature
-        pairs_time_difference = pd.DataFrame(pairs_time_difference, index=rt_values.index, columns=rt_values.index)
-        
-        # Replace 0s with NaNs in valid_rows
-        valid_rows_df = preprocessed_df.drop(columns=['m/z', 'rt'])
-        valid_rows_df = valid_rows_df.replace(0, np.nan)
+        with _feature_grouping_step_logger("RT neighborhood discovery"):
+            similar_rt_groups = {}
+            for feature in preprocessed_df.index:
+                rt = preprocessed_df.loc[feature, 'rt']
+                similar_features = preprocessed_df[np.abs(preprocessed_df['rt'] - rt) <= Rt_threshold].index.tolist()
+                similar_rt_groups[feature] = similar_features
 
-        # Compute the correlation matrix, ignoring NaN values
-        correlation_matrix_sp = valid_rows_df.transpose().corr(method='spearman').round(2)
-        
-        # Compute the interesected matrix, for the minimal shared column threshold. The idea is to have how many non-0 col in both pair of features are shared, for the correlation consistency
-        non_nan_mask = valid_rows_df.notna().astype(int)
-        shared_non_nan = np.dot(non_nan_mask.values, non_nan_mask.values.T) # Use broadcasting to create a 3D array where each (i, j) element is the AND operation between row i and row j
-        total_non_nan = (non_nan_mask.values[:, None, :] | non_nan_mask.values[None, :, :]).sum(axis=2)# Calculate the total non-NaN values for each pair of rows using logical OR 
-        ratio_matrix  = shared_non_nan / total_non_nan # for each pair of feature, tell the ratio of shared non-0 column 
-        ratio_matrix = pd.DataFrame(ratio_matrix, index=valid_rows_df.index, columns=valid_rows_df.index)
-        
-        # Create the edges list
-        edges = []  # edges list with correlation details
-        # Iterate over the pairs in pairs_df
-        for _, row in pairs_df.iterrows():
-            feature = row['feature']
-            other_feature = row['other_feature']
+            unique_lists = list({tuple(v) for v in similar_rt_groups.values()})
+            unique_lists = [list(t) for t in unique_lists]
+            similar_rt_groups_adjusted = {}
+            for feature in preprocessed_df.index:
+                similar_rt_groups_adjusted[feature] = max((lst for lst in unique_lists if feature in lst), key=len, default=[])
 
-            # Check if the correlation exists and is greater than 0.8
-            if feature in correlation_matrix_sp.index and other_feature in correlation_matrix_sp.columns:
-                corr_value = correlation_matrix_sp.loc[feature, other_feature]
-                ratio_value = ratio_matrix.loc[feature, other_feature]
-                rt_diff = pairs_time_difference.loc[feature, other_feature]
-                if (
-                    corr_value >= Correlation_threshold
-                    and ratio_value >= minimum_ratio_threshold
-                    and rt_diff <= Rt_threshold
-                ):
-                    edges.append(
-                        (
-                            feature,
-                            other_feature,
-                            corr_value,
+            all_pairs_possible = [
+                (feature, other_feature)
+                for feature, group in similar_rt_groups_adjusted.items()
+                for other_feature in group
+                if feature < other_feature
+            ]
+            pairs_df = pd.DataFrame(all_pairs_possible)
+            pairs_df.columns = ['feature', 'other_feature']
+            rt_values = preprocessed_df.loc[:, 'rt']
+            pairs_time_difference = np.abs(rt_values.values[:, None] - rt_values.values[None, :])
+            pairs_time_difference = pd.DataFrame(pairs_time_difference, index=rt_values.index, columns=rt_values.index)
+        
+        with _feature_grouping_step_logger("Correlation and coverage computation"):
+            valid_rows_df = preprocessed_df.drop(columns=['m/z', 'rt'])
+            valid_rows_df = valid_rows_df.replace(0, np.nan)
+            correlation_matrix_sp = valid_rows_df.transpose().corr(method='spearman').round(2)
+            non_nan_mask = valid_rows_df.notna().astype(int)
+            shared_non_nan = np.dot(non_nan_mask.values, non_nan_mask.values.T)
+            total_non_nan = (non_nan_mask.values[:, None, :] | non_nan_mask.values[None, :, :]).sum(axis=2)
+            ratio_matrix  = shared_non_nan / total_non_nan
+            ratio_matrix = pd.DataFrame(ratio_matrix, index=valid_rows_df.index, columns=valid_rows_df.index)
+        
+        with _feature_grouping_step_logger("Edge filtering"):
+            edges = []
+            for _, row in pairs_df.iterrows():
+                feature = row['feature']
+                other_feature = row['other_feature']
+                if feature in correlation_matrix_sp.index and other_feature in correlation_matrix_sp.columns:
+                    corr_value = correlation_matrix_sp.loc[feature, other_feature]
+                    ratio_value = ratio_matrix.loc[feature, other_feature]
+                    rt_diff = pairs_time_difference.loc[feature, other_feature]
+                    if (
+                        corr_value >= Correlation_threshold
+                        and ratio_value >= minimum_ratio_threshold
+                        and rt_diff <= Rt_threshold
+                    ):
+                        edges.append(
+                            (
+                                feature,
+                                other_feature,
+                                corr_value,
+                            )
                         )
-                    )
 
-        for feature in preprocessed_df.index:
-            G.add_node(feature, mz=preprocessed_df.loc[feature, 'm/z'])
-        for node in G.nodes():
-            G.nodes[node]['mz'] = preprocessed_df.loc[node, 'm/z']
-            G.nodes[node]['rt'] = preprocessed_df.loc[node, 'rt']
-            
-        # Add edges with correlation as edge attribute
-        for feature, other_feature, weight in edges:
-            G.add_edge(
-                feature,
-                other_feature,
-                weight=weight,
-                correlation=weight,
+        with _feature_grouping_step_logger("Graph construction and Louvain filtering"):
+            for feature in preprocessed_df.index:
+                G.add_node(feature, mz=preprocessed_df.loc[feature, 'm/z'])
+            for node in G.nodes():
+                G.nodes[node]['mz'] = preprocessed_df.loc[node, 'm/z']
+                G.nodes[node]['rt'] = preprocessed_df.loc[node, 'rt']
+
+            for feature, other_feature, weight in edges:
+                G.add_edge(
+                    feature,
+                    other_feature,
+                    weight=weight,
+                    correlation=weight,
+                )
+            G_before = G.copy()
+            total_before, counts_before = _group_size_counts(G_before)
+
+            communities = nx_comm.louvain_communities(G, weight='weight', resolution= 1)
+            community_map = {}
+            for i, community in enumerate(communities):
+                for node in community:
+                    community_map[node] = i
+
+            edges_to_remove = []
+            for u, v in G.edges():
+                if community_map[u] != community_map[v]:
+                    edges_to_remove.append((u, v))
+            G.remove_edges_from(edges_to_remove)
+
+            G_after = G.copy()
+            G_after.remove_edges_from(edges_to_remove)
+            total_after, counts_after = _group_size_counts(G_after)
+
+            all_sizes = sorted(set(counts_before.keys()) | set(counts_after.keys()))
+            row_before = {"state": "before", "total_groups": total_before}
+            row_after  = {"state": "after",  "total_groups": total_after}
+
+            for s in all_sizes:
+                row_before[f"rank{s}"] = counts_before.get(s, 0)
+                row_after[f"rank{s}"]  = counts_after.get(s, 0)
+
+            df_summary = pd.DataFrame([row_before, row_after])
+            rank_cols = [c for c in df_summary.columns if c.startswith("rank")]
+            zero_both = [c for c in rank_cols if df_summary[c].sum() == 0]
+            df_summary = df_summary.drop(columns=zero_both)
+            out_csv = os.path.join(".", "group_size_summary.csv")
+            df_summary.to_csv(out_csv, index=False)
+            logging_config.log_info(
+                logger,
+                "Feature grouping Louvain summary saved to %s",
+                out_csv,
+                project=project_name,
             )
-        G_before = G.copy()
-        total_before, counts_before = _group_size_counts(G_before)
-        
-        # Apply the Louvain method for community detection. in order to better separated feature groups (mostly due wrong association of two nodes between two bigger groups)
-        communities = nx_comm.louvain_communities(G, weight='weight', resolution= 1)
 
-        # Create a mapping of nodes to their community
-        community_map = {}
-        for i, community in enumerate(communities):
-            for node in community:
-                community_map[node] = i
+            isolated_nodes = [node for node, degree in G.degree() if degree == 0]
 
-        # Identify and remove edges between communities
-        edges_to_remove = []
-        for u, v in G.edges():
-            if community_map[u] != community_map[v]:
-                edges_to_remove.append((u, v))
-        G.remove_edges_from(edges_to_remove)
-        
-        G_after = G.copy()
-        G_after.remove_edges_from(edges_to_remove)
-        total_after, counts_after = _group_size_counts(G_after)
-        
-        # ----- BUILD SUMMARY TABLE -----
-        all_sizes = sorted(set(counts_before.keys()) | set(counts_after.keys()))
-        row_before = {"state": "before", "total_groups": total_before}
-        row_after  = {"state": "after",  "total_groups": total_after}
-        
-        for s in all_sizes:
-            row_before[f"rank{s}"] = counts_before.get(s, 0)
-            row_after[f"rank{s}"]  = counts_after.get(s, 0)
-        
-        df_summary = pd.DataFrame([row_before, row_after])
-        
-        # drop rank columns that are zero in BOTH rows
-        rank_cols = [c for c in df_summary.columns if c.startswith("rank")]
-        zero_both = [c for c in rank_cols if df_summary[c].sum() == 0]
-        df_summary = df_summary.drop(columns=zero_both)
-        
-        # write CSV (adjust path if you have an export folder)
-        out_csv = os.path.join(".", "group_size_summary.csv")  # e.g., "./group_size_summary_MyExp.csv"
-        df_summary.to_csv(out_csv, index=False)
-        print(f"[MassLearn] Group-size summary written to: {out_csv}")
-
-    
-       
-        
-        # Identify nodes with degree zero (meaning not conencted to another node)
-        isolated_nodes = [node for node, degree in G.degree() if degree == 0]
-        
-        # Remove these nodes from the graph
-        #G.remove_nodes_from(isolated_nodes)
-        
-        # Creating a new DataFrame with the same structure as p_df but empty
-        ion_df = pd.DataFrame(columns = preprocessed_df.columns) # ion_df will be all the unique precusor ion, with highest m/z as default representing m/z. Each line of ion_df represent a precusor ion, which is composed of one or multiple features
-        stand_ion_df = pd.DataFrame(columns = preprocessed_df.columns) 
-        print('feature grouped')
+            ion_df = pd.DataFrame(columns = preprocessed_df.columns)
+            stand_ion_df = pd.DataFrame(columns = preprocessed_df.columns)
 
         # Iterating through the list L and calculating the averages
         ID = 1 # correspond to group node (feature group) IDs
@@ -3306,6 +3377,12 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
         ion_df_raw = ion_df.copy(deep=True)
         updated_fig = convert_graph_to_2d_plotly_figure(G)
         network_updated = True
+        logging_config.log_info(
+            logger,
+            "Feature grouping update completed successfully (%s groups)",
+            ID - 1,
+            project=project_name,
+        )
         return updated_fig, dropdown_items, dropdown_items_binary, dropdown_items, dropdown_items[0]['value'], dropdown_items_binary[0]['value'], dropdown_items[0]['value']
     
     elif button_id == 'network-intermediate':
@@ -3414,11 +3491,21 @@ def statistical_run(n_clicks, n, sample_threshold):
     global fg_table, fg_table_render, stat_proces_thread, network_updated, updating, loading_progress, pres_sample_threshold
     pres_sample_threshold = sample_threshold
     if network_updated and stat_proces_thread == None:
+        logging_config.log_info(
+            logger,
+            "Statistical tests queued after feature grouping",
+            project=_active_project_name(),
+        )
         stat_proces_thread = start_run()
         return dash.no_update, None, 0, '0 %', dash.no_update, dash.no_update, 0, '0 %', dash.no_update, dash.no_update
     elif network_updated and stat_proces_thread.is_alive():
         return dash.no_update, None, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update
     elif network_updated and not(stat_proces_thread.is_alive()):
+        logging_config.log_info(
+            logger,
+            "Statistical tests finished",
+            project=_active_project_name(),
+        )
         stat_proces_thread = None
         network_updated = False
         updating = False
@@ -3426,7 +3513,12 @@ def statistical_run(n_clicks, n, sample_threshold):
     return dash.no_update, None, 0, 100 ,dash.no_update, dash.no_update, 0, 100 ,dash.no_update, dash.no_update
 
 # This method starts the run method in a new thread
-def start_run():    
+def start_run():
+    logging_config.log_info(
+        logger,
+        "Launching statistical test thread",
+        project=_active_project_name(),
+    )
     thread = threading.Thread(target=generate_stat)
     thread.start()
     return thread
@@ -3464,136 +3556,144 @@ def correction(fg_table):
     return fg_table
 
 # Funciton to realize statistical test or all treatment classes
-def generate_stat():    
+def generate_stat():
     global fg_table, fg_table_render, G, sample_list, project_loaded, meta_intensities, preprocessed_df_raw, preprocessed_df, pres_sample_threshold
 
-    # Creating the feature_group table, resuming the feature groupes main charasteristics
-    fg_table = {'sd_table':[], 'm/z (Da)':[], 'rt (min)':[], 'FG':[], 'Size':[], 'Nodes' : []}
-    test_type = {}
-    for level in sample_list.index:
-        test_type[level] = 'no_test'
-        fg_table[level+' no_test p'] = []
-        fg_table[level+' no_test a'] = []
-        fg_table[level+' no_test np-p'] = []
-    
-    # Iterating through the list L and calculating the averages
-    FG = 1 # correspond to group node (feature group) IDs
-    num_components = len(list(nx.connected_components(G)))
-    for c, component in enumerate(nx.connected_components(G)): # component is a set of ions   
-        global loading_progress
-        loading_progress = int((c/num_components)*100) # for the fg table progress bar
-        # Filter the rows in p_df where feature is in the current set
-        if project_loaded.meta:
-            if meta_intensities:
-                subset_df = preprocessed_df_raw.loc[preprocessed_df_raw['feature'].isin(component)]
-            else:
-                subset_df = preprocessed_df.loc[preprocessed_df['feature'].isin(component)]
-        else:
-            subset_df = preprocessed_df[preprocessed_df.index.isin(component)]
-        max_mass = subset_df['m/z'].max()
-        mean_rt = subset_df['rt'].mean()
-        subset_df = subset_df.drop(columns=['m/z', 'rt'])
-        if project_loaded.meta:
-            subset_df = subset_df.drop(columns=['feature'])
-
-        # Proceed the fg_table creation            
-        sd_table, all_final_means, all_sample_mean, stat_result = stat_n_assumptions(component, sample_list, pres_sample_threshold) 
-        fg_table['m/z (Da)'].append(max_mass)
-        fg_table['rt (min)'].append(round(mean_rt,2))
-        fg_table['FG'].append(FG)
-        fg_table['Size'].append(len(subset_df))
-        fg_table['Nodes'].append(component)
-        
-        colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
-        
-        for level in sample_list.index: # add statistical test results and assumptions validity for each treatment level
-            if stat_result.loc[stat_result['Level'] == level,].any().any(): # if there are stat test for such level      
-                test = stat_result.loc[stat_result['Level'] == level, 'Test_type'].values[0]
-                test_result = float(stat_result.loc[stat_result['Level'] == level, 'Test_p-value'].values[0])
-                assumpion_validity = stat_result.loc[stat_result['Level'] == level, 'Assumption_validity'].values[0]
-                non_param_pvalue = stat_result.loc[stat_result['Level'] == level, 'Non_parametric_p-value'].values[0]
-                
-                # Process fg_table
-                test_type[level] = test # if the first lines have no test
-                if level+f' {test} p' not in fg_table.keys():
-                    existing_values = fg_table[level+' no_test p']
-                    fg_table[level+f' {test} p'] = existing_values
-                    fg_table[level+f' {test} p'].append(test_result)
-                    fg_table.pop(level+' no_test p', None) # delete the no test key
-                    
-                    existing_values = fg_table[level+' no_test a']
-                    fg_table[level+f' {test} a'] = existing_values
-                    fg_table[level+f' {test} a'].append(assumpion_validity)
-                    fg_table.pop(level+' no_test a', None)
-                    
-                    existing_values = fg_table[level+' no_test np-p']
-                    fg_table[level+f' {test} np-p'] = existing_values
-                    fg_table[level+f' {test} np-p'].append(non_param_pvalue)
-                    fg_table.pop(level+' no_test np-p', None)
-                else:
-                    fg_table[level+f' {test} p'].append(test_result)
-                    fg_table[level+f' {test} a'].append(assumpion_validity)
-                    fg_table[level+f' {test} np-p'].append(non_param_pvalue)
-            else:
-                test = test_type[level]
-                fg_table[level+f' {test} p'].append('-')
-                fg_table[level+f' {test} a'].append('-')
-                fg_table[level+f' {test} np-p'].append('-')
-
-        
-        # Define the color of the component (feature group). For each compnent, they are as many stat test as treatment class, so we need to display the color based on the most relevant information, showing green for example if one test is sig and valid
-        for node in component:
-            G.nodes[node]['FG'] = FG
-            G.nodes[node]['color'] = colors[8]
-
-        FG += 1 # feature group id
-        
-        fg_table['sd_table'].append(sd_table)
-      
-    fg_table = pd.DataFrame(fg_table)
-    
-    fg_table = correction(fg_table) # make correction of the p values
-    
-    for ix, row in fg_table.iterrows():
-        color_pattern = [] # to determinate what is the color of the component nodes in the 3D network, first bool is stat test, second are assumptions
+    project_name = _active_project_name()
+    logging_config.log_info(
+        logger,
+        "Statistical tests started",
+        project=project_name,
+    )
+    try:
+        fg_table = {'sd_table':[], 'm/z (Da)':[], 'rt (min)':[], 'FG':[], 'Size':[], 'Nodes' : []}
+        test_type = {}
         for level in sample_list.index:
-            t_type = test_type[level]
-            res = row[f'{level} {t_type} p']
-            if res != '-':
-                test_result = float(row[f'{level} {t_type} p'])
-                assumpion_validity = row[f'{level} {t_type} a']
+            test_type[level] = 'no_test'
+            fg_table[level+' no_test p'] = []
+            fg_table[level+' no_test a'] = []
+            fg_table[level+' no_test np-p'] = []
+
+        colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
+        FG = 1 # correspond to group node (feature group) IDs
+        components = list(nx.connected_components(G))
+        num_components = len(components)
+        for c, component in enumerate(components):
+            global loading_progress
+            loading_progress = int((c/num_components)*100)
+            if project_loaded.meta:
+                if meta_intensities:
+                    subset_df = preprocessed_df_raw.loc[preprocessed_df_raw['feature'].isin(component)]
+                else:
+                    subset_df = preprocessed_df.loc[preprocessed_df['feature'].isin(component)]
             else:
-                test_result = 1
-                assumpion_validity = 'no'
-                non_param_pvalue = 1
-            FG = row['FG']
-            
-            # Define color pattern
-            if test_result <= 0.05 and assumpion_validity == 'yes'  :
-                color_pattern.append('Green') # valid test and assumption valid
-            elif test_result <= 0.05  and assumpion_validity == 'no' :
-                color_pattern.append('Orange') # test valid but not assumption
-            elif test_result >= 0.05  and assumpion_validity == 'yes'  :
-                color_pattern.append('Red') # test not valid while assumptions are
-            elif test_result >= 0.05  and assumpion_validity == 'no' and  float(non_param_pvalue) <= 0.05:
-                color_pattern.append('Blue') # test not valid while assumptions are
-            else:
-                color_pattern.append('Grey') # nothing valid, meaning no significance of the test at all
-        for node in row['Nodes']:
-            # Below we apply the color to all nodes of the component if at least one test have something significant
-            if 'Green' in color_pattern:
-                G.nodes[node]['color'] = colors[2] # correspond to green in Set1
-            elif 'Orange' in color_pattern: # if assumptions are not met but significant
-                G.nodes[node]['color'] = colors[4]
-            elif 'Red' in color_pattern: # if assumptions are met but non significant
-                G.nodes[node]['color'] = colors[0]
-            elif 'Blue' in color_pattern: # when non significant and no assumption, and the on paramteric p value is significant
-                G.nodes[node]['color'] = colors[1]
-            else:
+                subset_df = preprocessed_df[preprocessed_df.index.isin(component)]
+            max_mass = subset_df['m/z'].max()
+            mean_rt = subset_df['rt'].mean()
+            subset_df = subset_df.drop(columns=['m/z', 'rt'])
+            if project_loaded.meta:
+                subset_df = subset_df.drop(columns=['feature'])
+
+            sd_table, all_final_means, all_sample_mean, stat_result = stat_n_assumptions(component, sample_list, pres_sample_threshold)
+            fg_table['m/z (Da)'].append(max_mass)
+            fg_table['rt (min)'].append(round(mean_rt,2))
+            fg_table['FG'].append(FG)
+            fg_table['Size'].append(len(subset_df))
+            fg_table['Nodes'].append(component)
+
+            for level in sample_list.index:
+                if stat_result.loc[stat_result['Level'] == level,].any().any():
+                    test = stat_result.loc[stat_result['Level'] == level, 'Test_type'].values[0]
+                    test_result = float(stat_result.loc[stat_result['Level'] == level, 'Test_p-value'].values[0])
+                    assumpion_validity = stat_result.loc[stat_result['Level'] == level, 'Assumption_validity'].values[0]
+                    non_param_pvalue = stat_result.loc[stat_result['Level'] == level, 'Non_parametric_p-value'].values[0]
+                    test_type[level] = test
+                    if level+f' {test} p' not in fg_table.keys():
+                        existing_values = fg_table[level+' no_test p']
+                        fg_table[level+f' {test} p'] = existing_values
+                        fg_table[level+f' {test} p'].append(test_result)
+                        fg_table.pop(level+' no_test p', None)
+
+                        existing_values = fg_table[level+' no_test a']
+                        fg_table[level+f' {test} a'] = existing_values
+                        fg_table[level+f' {test} a'].append(assumpion_validity)
+                        fg_table.pop(level+' no_test a', None)
+
+                        existing_values = fg_table[level+' no_test np-p']
+                        fg_table[level+f' {test} np-p'] = existing_values
+                        fg_table[level+f' {test} np-p'].append(non_param_pvalue)
+                        fg_table.pop(level+' no_test np-p', None)
+                    else:
+                        fg_table[level+f' {test} p'].append(test_result)
+                        fg_table[level+f' {test} a'].append(assumpion_validity)
+                        fg_table[level+f' {test} np-p'].append(non_param_pvalue)
+                else:
+                    test = test_type[level]
+                    fg_table[level+f' {test} p'].append('-')
+                    fg_table[level+f' {test} a'].append('-')
+                    fg_table[level+f' {test} np-p'].append('-')
+
+            for node in component:
+                G.nodes[node]['FG'] = FG
                 G.nodes[node]['color'] = colors[8]
-    fg_table = fg_table.drop(columns = ['Nodes'])
-    fg_table_render = fg_table.copy(deep=True)
-    return 'Done'
+
+            FG += 1
+            fg_table['sd_table'].append(sd_table)
+
+        fg_table = pd.DataFrame(fg_table)
+        fg_table = correction(fg_table)
+
+        for ix, row in fg_table.iterrows():
+            color_pattern = []
+            for level in sample_list.index:
+                t_type = test_type[level]
+                res = row[f'{level} {t_type} p']
+                if res != '-':
+                    test_result = float(row[f'{level} {t_type} p'])
+                    assumpion_validity = row[f'{level} {t_type} a']
+                else:
+                    test_result = 1
+                    assumpion_validity = 'no'
+                    non_param_pvalue = 1
+                FG = row['FG']
+                if test_result <= 0.05 and assumpion_validity == 'yes':
+                    color_pattern.append('Green')
+                elif test_result <= 0.05 and assumpion_validity == 'no':
+                    color_pattern.append('Orange')
+                elif test_result >= 0.05 and assumpion_validity == 'yes':
+                    color_pattern.append('Red')
+                elif test_result >= 0.05 and assumpion_validity == 'no' and float(non_param_pvalue) <= 0.05:
+                    color_pattern.append('Blue')
+                else:
+                    color_pattern.append('Grey')
+            for node in row['Nodes']:
+                if 'Green' in color_pattern:
+                    G.nodes[node]['color'] = colors[2]
+                elif 'Orange' in color_pattern:
+                    G.nodes[node]['color'] = colors[4]
+                elif 'Red' in color_pattern:
+                    G.nodes[node]['color'] = colors[0]
+                elif 'Blue' in color_pattern:
+                    G.nodes[node]['color'] = colors[1]
+                else:
+                    G.nodes[node]['color'] = colors[8]
+        fg_table = fg_table.drop(columns = ['Nodes'])
+        fg_table_render = fg_table.copy(deep=True)
+        logging_config.log_info(
+            logger,
+            "Statistical tests completed for %s feature groups",
+            len(fg_table['FG']),
+            project=project_name,
+        )
+        return 'Done'
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging_config.log_exception(
+            logger,
+            "Statistical tests failed",
+            project=project_name,
+            exception=exc,
+        )
+        raise
 
 
 
