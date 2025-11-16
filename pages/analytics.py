@@ -13,13 +13,16 @@ This file creates a Dash app. It displays multiple tools for statistical anayzes
 ###############################################################################
 import os
 import re
+import json
 import dash
 import scipy
+import logging
 import warnings
 import itertools
 import threading
 import scipy.stats
-from typing import Optional
+from typing import Dict, List, Optional
+from contextlib import contextmanager
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -41,12 +44,11 @@ from sklearn.cross_decomposition import PLSRegression
 from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from dash import html, dcc, dash_table, callback_context, callback
+import lz4.frame
 
-from Modules.peak_shape import (
-    PeakShapeVectors,
-    build_peak_shape_vectors,
-    peak_shape_similarity,
-)
+from Modules import logging_config
+
+logger = logging.getLogger(__name__)
 
 cache = Cache('./disk_cache')
 
@@ -116,7 +118,14 @@ def add_zeros(Df, Samples): # Df is featurelist, meaning msn_df_deblanked, Sampl
     
     # Columns to copy from existing rows
     columns_to_copy = ['feature', 'rt', 'm/z', 'MS_level']
-    default_values = {col: 0 for col in Df.columns if col not in columns_to_copy + ['sample', 'mzml_name']}
+    default_values = {}
+    for col in Df.columns:
+        if col in columns_to_copy + ['sample', 'mzml_name']:
+            continue
+        if col == 'shape_id':
+            default_values[col] = None
+        else:
+            default_values[col] = 0
     
     # Create a new dataframe to hold the complete data
     new_rows = []
@@ -379,8 +388,9 @@ G = nx.Graph() # Create the G network, meaning the python object for feature net
 S = nx.Graph() # Network for the meta feature grouping
 ion_df = None
 ion_df_raw = None
-peak_shape_vectors: Optional[PeakShapeVectors] = None
-peak_shape_vectors_raw: Optional[PeakShapeVectors] = None
+shape_vector_store: Dict[str, np.ndarray] = {}
+feature_shape_vectors: Dict[str, np.ndarray] = {}
+SHAPE_VECTOR_POINTS = 80
 levels = None
 loading_progress = None
 meta_intensities = None
@@ -407,6 +417,176 @@ updating = False
 validity = False
 volcano_feature_groups = None
 
+
+def _active_project():
+    return project_loaded
+
+
+def _active_project_name() -> Optional[str]:
+    project = _active_project()
+    if project is None:
+        return None
+    return getattr(project, 'project_name', getattr(project, 'name', None))
+
+
+@contextmanager
+def _feature_grouping_step_logger(step_name: str):
+    project_name = _active_project_name()
+    project_context = _active_project()
+    logging_config.log_info(
+        logger,
+        "Feature grouping step started: %s",
+        step_name,
+        project=project_context,
+    )
+    try:
+        yield
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging_config.log_exception(
+            logger,
+            "Feature grouping step failed: %s",
+            step_name,
+            project=project_context,
+            exception=exc,
+        )
+        raise
+    else:
+        logging_config.log_info(
+            logger,
+            "Feature grouping step completed: %s",
+            step_name,
+            project=project_context,
+        )
+
+
+def _shape_payload_to_vector(shape_payload) -> Optional[np.ndarray]:
+    if (
+        not isinstance(shape_payload, (list, tuple))
+        or len(shape_payload) != 2
+    ):
+        return None
+    rts, intensities = shape_payload
+    if not rts or not intensities:
+        return None
+    rts_array = np.asarray(rts, dtype=float)
+    intensities_array = np.asarray(intensities, dtype=float)
+    mask = np.isfinite(rts_array) & np.isfinite(intensities_array)
+    if mask.sum() < 3:
+        return None
+    rts_array = rts_array[mask]
+    intensities_array = intensities_array[mask]
+    order = np.argsort(rts_array)
+    rts_array = rts_array[order]
+    intensities_array = intensities_array[order]
+    apex_index = int(np.argmax(intensities_array))
+    apex_rt = rts_array[apex_index]
+    centered_rts = rts_array - apex_rt
+    max_abs_rt = np.max(np.abs(centered_rts))
+    if max_abs_rt > 0:
+        normalized_rts = centered_rts / max_abs_rt
+    else:
+        normalized_rts = centered_rts
+    intensities_mean = intensities_array.mean()
+    intensities_std = intensities_array.std()
+    if intensities_std > 0:
+        normalized_intensities = (intensities_array - intensities_mean) / intensities_std
+    else:
+        normalized_intensities = intensities_array - intensities_mean
+    grid = np.linspace(-1.0, 1.0, SHAPE_VECTOR_POINTS)
+    vector = np.interp(
+        grid,
+        normalized_rts,
+        normalized_intensities,
+        left=0.0,
+        right=0.0,
+    )
+    norm = np.linalg.norm(vector)
+    if norm == 0:
+        return None
+    return vector / norm
+
+
+def _load_shape_vector_store(store_path: Optional[str]) -> Dict[str, np.ndarray]:
+    vectors: Dict[str, np.ndarray] = {}
+    if not store_path or not os.path.isfile(store_path):
+        return vectors
+    try:
+        with lz4.frame.open(store_path, mode="rt", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                shape_id = record.get("shape_id")
+                vector = _shape_payload_to_vector(record.get("shape"))
+                if shape_id and vector is not None:
+                    vectors[str(shape_id)] = vector
+    except OSError:
+        print("Unable to load chromatographic shapes; continuing without shape refinement.")
+    return vectors
+
+
+def _build_feature_shape_vector_index(
+    feature_df: Optional[pd.DataFrame],
+    shape_vectors: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    feature_vectors: Dict[str, np.ndarray] = {}
+    if (
+        feature_df is None
+        or shape_vectors is None
+        or not shape_vectors
+        or 'shape_id' not in feature_df.columns
+    ):
+        return feature_vectors
+    mapping = (
+        feature_df[['feature', 'shape_id']]
+        .dropna(subset=['shape_id'])
+        .copy(deep=True)
+    )
+    if mapping.empty:
+        return feature_vectors
+    mapping['shape_id'] = mapping['shape_id'].astype(str)
+    for feature, group in mapping.groupby('feature'):
+        vectors = [
+            shape_vectors.get(shape_id)
+            for shape_id in group['shape_id']
+            if shape_id in shape_vectors
+        ]
+        vectors = [vec for vec in vectors if vec is not None]
+        if not vectors:
+            continue
+        stacked = np.vstack(vectors)
+        mean_vector = stacked.mean(axis=0)
+        norm = np.linalg.norm(mean_vector)
+        if norm > 0:
+            mean_vector = mean_vector / norm
+        feature_vectors[feature] = mean_vector
+    return feature_vectors
+
+
+def _initialize_shape_vectors(feature_df: Optional[pd.DataFrame]):
+    global shape_vector_store, feature_shape_vectors, project_loaded
+    store_path = getattr(project_loaded, 'shape_store_path', None)
+    shape_vector_store = _load_shape_vector_store(store_path)
+    feature_shape_vectors = _build_feature_shape_vector_index(
+        feature_df,
+        shape_vector_store,
+    )
+
+
+def _refresh_feature_shape_vectors(feature_df: Optional[pd.DataFrame]):
+    global feature_shape_vectors, shape_vector_store
+    if not shape_vector_store:
+        feature_shape_vectors = {}
+        return
+    feature_shape_vectors = _build_feature_shape_vector_index(
+        feature_df,
+        shape_vector_store,
+    )
+
 def initiate_project(Project):
     global featurelist, featurelist_raw, featurepath, featurelistname
     global treatment, project_loaded
@@ -415,7 +595,7 @@ def initiate_project(Project):
     global levels, sample_list, sample_list_raw, all_treatments, treatment_selection
     global dropdown_items, dropdown_items_binary
     global fg_table, fg_table_render
-    global peak_shape_vectors, peak_shape_vectors_raw
+    global shape_vector_store, feature_shape_vectors
     
     project_loaded = Project
     featurelist = project_loaded.msn_df_deblanked
@@ -441,14 +621,7 @@ def initiate_project(Project):
     featurelist_raw = featurelist.copy(deep=True) # back up of the variable, necessary for the filtering option tool
     featurepath = project_loaded.featurepath
     featurelistname = project_loaded.name
-
-    peak_shape_vectors = build_peak_shape_vectors(featurelist)
-    if peak_shape_vectors is not None:
-        peak_shape_vectors_raw = PeakShapeVectors(
-            vectors=peak_shape_vectors.vectors.copy(deep=True)
-        )
-    else:
-        peak_shape_vectors_raw = None
+    _initialize_shape_vectors(featurelist)
     
 
     # Add the rt and m/z values for each feature
@@ -552,7 +725,7 @@ def initiate_project_meta(Project):
     global dropdown_items, dropdown_items_binary
     global S, FG_pair_shared_features, potential_neutral_masses_groups
     global fg_table, fg_table_render
-    global peak_shape_vectors, peak_shape_vectors_raw
+    global shape_vector_store, feature_shape_vectors
     
     project_loaded = Project
     
@@ -564,13 +737,7 @@ def initiate_project_meta(Project):
     featurelist = featurelist.drop([col for col in featurelist.columns if not col or col.strip() == ''], axis=1)
     featurelist = featurelist.drop(columns = ['label'])
     featurelist_raw = featurelist.copy(deep=True)
-    peak_shape_vectors = build_peak_shape_vectors(featurelist)
-    if peak_shape_vectors is not None:
-        peak_shape_vectors_raw = PeakShapeVectors(
-            vectors=peak_shape_vectors.vectors.copy(deep=True)
-        )
-    else:
-        peak_shape_vectors_raw = None
+    _initialize_shape_vectors(featurelist)
     treatment = project_loaded.treatment
     fg_table, fg_table_render = None, pd.DataFrame() 
     # Find the list of sampels (without blank)
@@ -937,7 +1104,7 @@ main_layout =  html.Div([
                         dbc.InputGroup(
                             [dbc.InputGroupText("Shape Corr.", id='shape-input'),
                              dbc.Input(id='shape-threshold',
-                                       type="number", value=0.7, step=0.01, min=-1, max=1)],
+                                       type="number", value=0.7, step=0.01, min=0, max=1)],
                             size="sm"
                                 ),
                         dbc.Tooltip(
@@ -949,7 +1116,7 @@ main_layout =  html.Div([
                             target="spearman-input",  # ID of the component to which the tooltip is attached
                             placement="top"),
                         dbc.Tooltip(
-                            "Cosine similarity of chromatographic-shape descriptors. Set to 0 to ignore the shape filter.",
+                            "Minimum chromatographic-shape similarity used to subdivide feature groups after the network step. Set to 0 to skip the shape refinement stage.",
                             target="shape-input",
                             placement="top")], style={'display': 'flex','margin-bottom': '10px'}),
                     html.Div([
@@ -1549,7 +1716,7 @@ def display_options(Click = None): # Click is a None value when the filtering op
 # Function to remove or add (filter) treatments from the filtering options. Treatment variable are all treatment which are selected
 def filter_sample(Treatments):
     global featurelist, all_treatments, sample_list, preprocessed_df, featurelist
-    global dropdown_items, dropdown_items_binary, peak_shape_vectors
+    global dropdown_items, dropdown_items_binary
     raw_values = [t['value'] for t in all_treatments] # here are all the treatments no matter the levels, in a list
     to_filter = []
     for t in raw_values:
@@ -1566,7 +1733,7 @@ def filter_sample(Treatments):
     preprocessed_df.drop(sample_removed, axis=1, inplace=True)
     stand_preprocessed_df.drop(sample_removed, axis=1, inplace=True)
     featurelist = featurelist[~featurelist['sample'].isin(sample_removed)]
-    peak_shape_vectors = build_peak_shape_vectors(featurelist)
+    _refresh_feature_shape_vectors(featurelist)
     dropdown_items, dropdown_items_binary  = dropdowns(sample_list)
     
 
@@ -1583,7 +1750,6 @@ def update_samples(Selected_treatments):
     global sample_list, dropdown_items, dropdown_items_binary
     global preprocessed_df, stand_preprocessed_df
     global featurelist
-    global peak_shape_vectors, peak_shape_vectors_raw
     global treatment_selection
     
     if trigger == 'filter-treatment':
@@ -1596,12 +1762,7 @@ def update_samples(Selected_treatments):
         featurelist = featurelist_raw.copy(deep=True)
         stand_preprocessed_df = stand_preprocessed_df_raw.copy(deep=True)
         dropdown_items, dropdown_items_binary = dropdowns(sample_list)
-        if peak_shape_vectors_raw is not None:
-            peak_shape_vectors = PeakShapeVectors(
-                vectors=peak_shape_vectors_raw.vectors.copy(deep=True)
-            )
-        else:
-            peak_shape_vectors = None
+        _refresh_feature_shape_vectors(featurelist)
         # Step 2: Adapt sample list
         filter_sample(Selected_treatments)
         
@@ -2594,6 +2755,89 @@ def _group_size_counts(graph):
     cnt = collections.Counter(sizes)  # {size: how_many_groups}
     return len(sizes), cnt
 
+
+def _refine_component_by_shape(component_nodes, threshold, graph):
+    if threshold <= 0 or not feature_shape_vectors:
+        return [set(component_nodes)]
+    nodes = set(component_nodes)
+    project_name = _active_project_name()
+    project_context = _active_project()
+    logging_config.log_info(
+        logger,
+        "Shape refinement started for component (%s nodes, threshold=%.2f)",
+        len(nodes),
+        threshold,
+        project=project_context,
+    )
+    available = []
+    missing = []
+    for node in nodes:
+        vector = feature_shape_vectors.get(node)
+        if vector is None:
+            missing.append(node)
+        else:
+            available.append((node, vector))
+    if len(available) < 2:
+        logging_config.log_info(
+            logger,
+            "Shape refinement skipped for component (%s nodes) due to insufficient vectors",
+            len(nodes),
+            project=project_context,
+        )
+        return [set(nodes)]
+    try:
+        H = nx.Graph()
+        H.add_nodes_from(node for node, _ in available)
+        for idx, (node_i, vec_i) in enumerate(available):
+            for jdx in range(idx + 1, len(available)):
+                node_j, vec_j = available[jdx]
+                norm_i = np.linalg.norm(vec_i)
+                norm_j = np.linalg.norm(vec_j)
+                if norm_i == 0 or norm_j == 0:
+                    continue
+                similarity = float(np.dot(vec_i, vec_j) / (norm_i * norm_j))
+                if similarity >= threshold:
+                    H.add_edge(node_i, node_j, weight=similarity)
+        shape_components = [set(comp) for comp in nx.connected_components(H)]
+        if len(shape_components) <= 1:
+            logging_config.log_info(
+                logger,
+                "Shape refinement produced a single subset for component (%s nodes)",
+                len(nodes),
+                project=project_context,
+            )
+            return [set(nodes)]
+        for node in missing:
+            neighbors = set(graph.neighbors(node)).intersection(nodes)
+            if neighbors:
+                best_idx = 0
+                best_overlap = -1
+                for idx, comp in enumerate(shape_components):
+                    overlap = len(neighbors & comp)
+                    if overlap > best_overlap:
+                        best_overlap = overlap
+                        best_idx = idx
+                shape_components[best_idx].add(node)
+            else:
+                shape_components[0].add(node)
+        logging_config.log_info(
+            logger,
+            "Shape refinement completed for component (%s nodes) with %s refined groups",
+            len(nodes),
+            len(shape_components),
+            project=project_context,
+        )
+        return shape_components
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging_config.log_exception(
+            logger,
+            "Shape refinement failed for component (%s nodes)",
+            len(nodes),
+            project=project_context,
+            exception=exc,
+        )
+        return [set(nodes)]
+
 # Callback for updating the network graph
 @callback(
     [Output('network-graph', 'figure'),
@@ -2617,7 +2861,7 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     global stand_ion_df, ion_df, ion_df_raw
     global dropdown_items_binary, dropdown_items, fg_table, fg_table_render
     global validity, project_loaded, featurelist, meta_intensities
-    global peak_shape_vectors
+    global feature_shape_vectors
     
     ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
@@ -2625,8 +2869,8 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     if Shape_threshold is None:
         Shape_threshold = 0.0
     else:
-        Shape_threshold = max(-1.0, min(1.0, Shape_threshold))
-    apply_shape_filter = Shape_threshold > 0 and peak_shape_vectors is not None
+        Shape_threshold = max(0.0, min(1.0, Shape_threshold))
+    shape_refinement_enabled = Shape_threshold > 0 and bool(feature_shape_vectors)
 
     if validity == False:
         raise PreventUpdate()
@@ -2647,188 +2891,190 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     
     if button_id == 'update-button' and not (project_loaded.meta == True):
         updating = True
+        project_name = _active_project_name()
+        project_context = _active_project()
+        logging_config.log_info(
+            logger,
+            "Feature grouping update requested (RT=%.2f, Corr=%.2f, Shape=%.2f)",
+            Rt_threshold,
+            Correlation_threshold,
+            Shape_threshold,
+            project=project_context,
+        )
         # Recreate the network graph based on new threshold values
         G.clear()  # Reset the graph
-        minimum_ratio_threshold = 1 - (3/len(project_loaded.sample_names)) # 0.7 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more sampels in an experiment, the higher this threshold to avoid chained wrong corrrelation 
+        sample_count = len(project_loaded.sample_names)
+        if sample_count == 0:
+            # Fall back to the intensity columns present on the preprocessed dataframe (m/z and rt are metadata)
+            sample_count = max(0, len(preprocessed_df.columns) - 2)
+        if sample_count == 0:
+            logging.warning("No samples detected on project %s; disabling shared-coverage ratio threshold", project_loaded.project_name)
+            minimum_ratio_threshold = 0.0
+        else:
+            minimum_ratio_threshold = 1 - (3 / sample_count)
+            minimum_ratio_threshold = max(0.0, min(1.0, minimum_ratio_threshold))
+        # 0.7 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more samples in an experiment, the higher this threshold to avoid chained wrong correlation
         
-        # Define the RT similarity threshold. For each feature, find other features within the RT threshold
-        similar_rt_groups = {}
-        for feature in preprocessed_df.index:
-            rt = preprocessed_df.loc[feature, 'rt']
-            similar_features = preprocessed_df[np.abs(preprocessed_df['rt'] - rt) <= Rt_threshold].index.tolist()
-            similar_rt_groups[feature] = similar_features
-            
-        # Adjsut the similar rt grouping, to keep only the the group with high sized, to avoid a fature to make a false positive correlation between two relevant feature groups
-        unique_lists = list({tuple(v) for v in similar_rt_groups.values()})
-        unique_lists = [list(t) for t in unique_lists]
-        similar_rt_groups_adjusted = {}
-        for feature in preprocessed_df.index:
-            similar_rt_groups_adjusted[feature] = max((lst for lst in unique_lists if feature in lst), key=len, default=[]) # take only the biggest clusters of rt for a feature, to avoid that in-between feature groupfeature goes for false correlation of feature group
-        
-        all_pairs_possible = [(feature, other_feature) for feature, group in similar_rt_groups_adjusted.items() for other_feature in group if feature < other_feature]
-        pairs_df = pd.DataFrame(all_pairs_possible)
-        pairs_df.columns = ['feature', 'other_feature']
-        rt_values = preprocessed_df.loc[:,'rt']
-        pairs_time_difference = np.abs(rt_values.values[:, None] - rt_values.values[None, :]) # absolute tome difference between eahc pair of feature
-        pairs_time_difference = pd.DataFrame(pairs_time_difference, index=rt_values.index, columns=rt_values.index)
-        
-        # Replace 0s with NaNs in valid_rows
-        valid_rows_df = preprocessed_df.drop(columns=['m/z', 'rt'])
-        valid_rows_df = valid_rows_df.replace(0, np.nan)
+        with _feature_grouping_step_logger("RT neighborhood discovery"):
+            similar_rt_groups = {}
+            for feature in preprocessed_df.index:
+                rt = preprocessed_df.loc[feature, 'rt']
+                similar_features = preprocessed_df[np.abs(preprocessed_df['rt'] - rt) <= Rt_threshold].index.tolist()
+                similar_rt_groups[feature] = similar_features
 
-        # Compute the correlation matrix, ignoring NaN values
-        correlation_matrix_sp = valid_rows_df.transpose().corr(method='spearman').round(2)
-        
-        # Compute the interesected matrix, for the minimal shared column threshold. The idea is to have how many non-0 col in both pair of features are shared, for the correlation consistency
-        non_nan_mask = valid_rows_df.notna().astype(int)
-        shared_non_nan = np.dot(non_nan_mask.values, non_nan_mask.values.T) # Use broadcasting to create a 3D array where each (i, j) element is the AND operation between row i and row j
-        total_non_nan = (non_nan_mask.values[:, None, :] | non_nan_mask.values[None, :, :]).sum(axis=2)# Calculate the total non-NaN values for each pair of rows using logical OR 
-        ratio_matrix  = shared_non_nan / total_non_nan # for each pair of feature, tell the ratio of shared non-0 column 
-        ratio_matrix = pd.DataFrame(ratio_matrix, index=valid_rows_df.index, columns=valid_rows_df.index)
-        
-        # Create the edges list
-        edges = []  # edges list with correlation and shape similarity details
-        # Iterate over the pairs in pairs_df
-        for _, row in pairs_df.iterrows():
-            feature = row['feature']
-            other_feature = row['other_feature']
+            unique_lists = list({tuple(v) for v in similar_rt_groups.values()})
+            unique_lists = [list(t) for t in unique_lists]
+            similar_rt_groups_adjusted = {}
+            for feature in preprocessed_df.index:
+                similar_rt_groups_adjusted[feature] = max((lst for lst in unique_lists if feature in lst), key=len, default=[])
 
-            # Check if the correlation exists and is greater than 0.8
-            if feature in correlation_matrix_sp.index and other_feature in correlation_matrix_sp.columns:
-                corr_value = correlation_matrix_sp.loc[feature, other_feature]
-                ratio_value = ratio_matrix.loc[feature, other_feature]
-                rt_diff = pairs_time_difference.loc[feature, other_feature]
-                if (
-                    corr_value >= Correlation_threshold
-                    and ratio_value >= minimum_ratio_threshold
-                    and rt_diff <= Rt_threshold
-                ):
-                    shape_score = peak_shape_similarity(
-                        peak_shape_vectors, feature, other_feature
-                    )
-                    if shape_score is None:
-                        shape_score = 1.0
-                    if apply_shape_filter and shape_score < Shape_threshold:
-                        continue
-                    weight_shape = shape_score if apply_shape_filter else 1.0
-                    edge_weight = corr_value * max(weight_shape, 0.0)
-                    edges.append(
-                        (
-                            feature,
-                            other_feature,
-                            edge_weight,
-                            corr_value,
-                            shape_score,
+            all_pairs_possible = [
+                (feature, other_feature)
+                for feature, group in similar_rt_groups_adjusted.items()
+                for other_feature in group
+                if feature < other_feature
+            ]
+            pairs_df = pd.DataFrame(all_pairs_possible)
+            pairs_df.columns = ['feature', 'other_feature']
+            rt_values = preprocessed_df.loc[:, 'rt']
+            pairs_time_difference = np.abs(rt_values.values[:, None] - rt_values.values[None, :])
+            pairs_time_difference = pd.DataFrame(pairs_time_difference, index=rt_values.index, columns=rt_values.index)
+        
+        with _feature_grouping_step_logger("Correlation and coverage computation"):
+            valid_rows_df = preprocessed_df.drop(columns=['m/z', 'rt'])
+            valid_rows_df = valid_rows_df.replace(0, np.nan)
+            correlation_matrix_sp = valid_rows_df.transpose().corr(method='spearman').round(2)
+            non_nan_mask = valid_rows_df.notna().astype(int)
+            shared_non_nan = np.dot(non_nan_mask.values, non_nan_mask.values.T)
+            total_non_nan = (non_nan_mask.values[:, None, :] | non_nan_mask.values[None, :, :]).sum(axis=2)
+            ratio_matrix  = shared_non_nan / total_non_nan
+            ratio_matrix = pd.DataFrame(ratio_matrix, index=valid_rows_df.index, columns=valid_rows_df.index)
+        
+        with _feature_grouping_step_logger("Edge filtering"):
+            edges = []
+            for _, row in pairs_df.iterrows():
+                feature = row['feature']
+                other_feature = row['other_feature']
+                if feature in correlation_matrix_sp.index and other_feature in correlation_matrix_sp.columns:
+                    corr_value = correlation_matrix_sp.loc[feature, other_feature]
+                    ratio_value = ratio_matrix.loc[feature, other_feature]
+                    rt_diff = pairs_time_difference.loc[feature, other_feature]
+                    if (
+                        corr_value >= Correlation_threshold
+                        and ratio_value >= minimum_ratio_threshold
+                        and rt_diff <= Rt_threshold
+                    ):
+                        edges.append(
+                            (
+                                feature,
+                                other_feature,
+                                corr_value,
+                            )
                         )
-                    )
 
-        for feature in preprocessed_df.index:
-            G.add_node(feature, mz=preprocessed_df.loc[feature, 'm/z'])
-        for node in G.nodes():
-            G.nodes[node]['mz'] = preprocessed_df.loc[node, 'm/z']
-            G.nodes[node]['rt'] = preprocessed_df.loc[node, 'rt']
-            
-        # Add edges with correlation as edge attribute
-        for feature, other_feature, weight, corr_value, shape_score in edges:
-            G.add_edge(
-                feature,
-                other_feature,
-                weight=weight,
-                correlation=corr_value,
-                shape_similarity=shape_score,
+        with _feature_grouping_step_logger("Graph construction and Louvain filtering"):
+            for feature in preprocessed_df.index:
+                G.add_node(feature, mz=preprocessed_df.loc[feature, 'm/z'])
+            for node in G.nodes():
+                G.nodes[node]['mz'] = preprocessed_df.loc[node, 'm/z']
+                G.nodes[node]['rt'] = preprocessed_df.loc[node, 'rt']
+
+            for feature, other_feature, weight in edges:
+                G.add_edge(
+                    feature,
+                    other_feature,
+                    weight=weight,
+                    correlation=weight,
+                )
+            G_before = G.copy()
+            total_before, counts_before = _group_size_counts(G_before)
+
+            communities = nx_comm.louvain_communities(G, weight='weight', resolution= 1)
+            community_map = {}
+            for i, community in enumerate(communities):
+                for node in community:
+                    community_map[node] = i
+
+            edges_to_remove = []
+            for u, v in G.edges():
+                if community_map[u] != community_map[v]:
+                    edges_to_remove.append((u, v))
+            G.remove_edges_from(edges_to_remove)
+
+            G_after = G.copy()
+            G_after.remove_edges_from(edges_to_remove)
+            total_after, counts_after = _group_size_counts(G_after)
+
+            all_sizes = sorted(set(counts_before.keys()) | set(counts_after.keys()))
+            row_before = {"state": "before", "total_groups": total_before}
+            row_after  = {"state": "after",  "total_groups": total_after}
+
+            for s in all_sizes:
+                row_before[f"rank{s}"] = counts_before.get(s, 0)
+                row_after[f"rank{s}"]  = counts_after.get(s, 0)
+
+            df_summary = pd.DataFrame([row_before, row_after])
+            rank_cols = [c for c in df_summary.columns if c.startswith("rank")]
+            zero_both = [c for c in rank_cols if df_summary[c].sum() == 0]
+            df_summary = df_summary.drop(columns=zero_both)
+            out_csv = os.path.join(".", "group_size_summary.csv")
+            df_summary.to_csv(out_csv, index=False)
+            logging_config.log_info(
+                logger,
+                "Feature grouping Louvain summary saved to %s",
+                out_csv,
+                project=project_context,
             )
-        G_before = G.copy()
-        total_before, counts_before = _group_size_counts(G_before)
-        
-        # Apply the Louvain method for community detection. in order to better separated feature groups (mostly due wrong association of two nodes between two bigger groups)
-        communities = nx_comm.louvain_communities(G, weight='weight', resolution= 1)
 
-        # Create a mapping of nodes to their community
-        community_map = {}
-        for i, community in enumerate(communities):
-            for node in community:
-                community_map[node] = i
+            isolated_nodes = [node for node, degree in G.degree() if degree == 0]
 
-        # Identify and remove edges between communities
-        edges_to_remove = []
-        for u, v in G.edges():
-            if community_map[u] != community_map[v]:
-                edges_to_remove.append((u, v))
-        G.remove_edges_from(edges_to_remove)
-        
-        G_after = G.copy()
-        G_after.remove_edges_from(edges_to_remove)
-        total_after, counts_after = _group_size_counts(G_after)
-        
-        # ----- BUILD SUMMARY TABLE -----
-        all_sizes = sorted(set(counts_before.keys()) | set(counts_after.keys()))
-        row_before = {"state": "before", "total_groups": total_before}
-        row_after  = {"state": "after",  "total_groups": total_after}
-        
-        for s in all_sizes:
-            row_before[f"rank{s}"] = counts_before.get(s, 0)
-            row_after[f"rank{s}"]  = counts_after.get(s, 0)
-        
-        df_summary = pd.DataFrame([row_before, row_after])
-        
-        # drop rank columns that are zero in BOTH rows
-        rank_cols = [c for c in df_summary.columns if c.startswith("rank")]
-        zero_both = [c for c in rank_cols if df_summary[c].sum() == 0]
-        df_summary = df_summary.drop(columns=zero_both)
-        
-        # write CSV (adjust path if you have an export folder)
-        out_csv = os.path.join(".", "group_size_summary.csv")  # e.g., "./group_size_summary_MyExp.csv"
-        df_summary.to_csv(out_csv, index=False)
-        print(f"[MassLearn] Group-size summary written to: {out_csv}")
-
-    
-       
-        
-        # Identify nodes with degree zero (meaning not conencted to another node)
-        isolated_nodes = [node for node, degree in G.degree() if degree == 0]
-        
-        # Remove these nodes from the graph
-        #G.remove_nodes_from(isolated_nodes)
-        
-        # Creating a new DataFrame with the same structure as p_df but empty
-        ion_df = pd.DataFrame(columns = preprocessed_df.columns) # ion_df will be all the unique precusor ion, with highest m/z as default representing m/z. Each line of ion_df represent a precusor ion, which is composed of one or multiple features
-        stand_ion_df = pd.DataFrame(columns = preprocessed_df.columns) 
-        print('feature grouped')
+            ion_df = pd.DataFrame(columns = preprocessed_df.columns)
+            stand_ion_df = pd.DataFrame(columns = preprocessed_df.columns)
 
         # Iterating through the list L and calculating the averages
         ID = 1 # correspond to group node (feature group) IDs
-        for component in nx.connected_components(G): # component is a set of ions   
-            # Filter the rows in p_df where feature is in the current set
-            subset_df = preprocessed_df[preprocessed_df.index.isin(component)]
-            stand_subset_df = stand_preprocessed_df[stand_preprocessed_df.index.isin(component)]
-            max_mass = subset_df['m/z'].max()
-            mean_rt = subset_df['rt'].mean()
-            subset_df = subset_df.drop(columns=['m/z', 'rt'])
-            stand_subset_df = stand_subset_df.drop(columns=['m/z', 'rt'])
-        
-            # Calculate the average of the filtered rows (excluding the 'feature' column)
-            avg_row = subset_df.mean(numeric_only=True).to_frame().transpose()
-            stand_avg_row = stand_subset_df.mean(numeric_only=True).to_frame().transpose()
-            
-            avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
-            avg_row['rt'] = mean_rt
-            avg_row['Size'] = len(subset_df) # number of features present
-            avg_row['FG'] = ID
-            stand_avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
-            stand_avg_row['rt'] = mean_rt
-            stand_avg_row['Size'] = len(subset_df) # number of features present
-            stand_avg_row['FG'] = ID
-            
-            # Now perform the concatenation
-            ion_df = pd.concat([ion_df, avg_row], ignore_index=True)
-            stand_ion_df = pd.concat([stand_ion_df, stand_avg_row], ignore_index=True)
-    
-            colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
-            for node in component:
-                G.nodes[node]['feature_group'] = ID
-                G.nodes[node]['color'] = colors[8] # color is grey for the moment, because stats test are loading i background
-                    
-            ID += 1 # feature group id
+        for component in nx.connected_components(G): # component is a set of ions
+            if shape_refinement_enabled:
+                refined_components = _refine_component_by_shape(
+                    component,
+                    Shape_threshold,
+                    G,
+                )
+            else:
+                refined_components = [set(component)]
+            for refined_nodes in refined_components:
+                subset_df = preprocessed_df[preprocessed_df.index.isin(refined_nodes)]
+                stand_subset_df = stand_preprocessed_df[stand_preprocessed_df.index.isin(refined_nodes)]
+                if subset_df.empty or stand_subset_df.empty:
+                    continue
+                max_mass = subset_df['m/z'].max()
+                mean_rt = subset_df['rt'].mean()
+                subset_df = subset_df.drop(columns=['m/z', 'rt'])
+                stand_subset_df = stand_subset_df.drop(columns=['m/z', 'rt'])
+
+                # Calculate the average of the filtered rows (excluding the 'feature' column)
+                avg_row = subset_df.mean(numeric_only=True).to_frame().transpose()
+                stand_avg_row = stand_subset_df.mean(numeric_only=True).to_frame().transpose()
+
+                avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
+                avg_row['rt'] = mean_rt
+                avg_row['Size'] = len(subset_df) # number of features present
+                avg_row['FG'] = ID
+                stand_avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
+                stand_avg_row['rt'] = mean_rt
+                stand_avg_row['Size'] = len(subset_df) # number of features present
+                stand_avg_row['FG'] = ID
+
+                # Now perform the concatenation
+                ion_df = pd.concat([ion_df, avg_row], ignore_index=True)
+                stand_ion_df = pd.concat([stand_ion_df, stand_avg_row], ignore_index=True)
+
+                colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
+                for node in refined_nodes:
+                    G.nodes[node]['feature_group'] = ID
+                    G.nodes[node]['color'] = colors[8] # color is grey for the moment, because stats test are loading i background
+
+                ID += 1 # feature group id
     
         # Convert the updated graph to a Plotly figure
         ion_df_raw = ion_df.copy(deep=True)
@@ -3139,6 +3385,12 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
         ion_df_raw = ion_df.copy(deep=True)
         updated_fig = convert_graph_to_2d_plotly_figure(G)
         network_updated = True
+        logging_config.log_info(
+            logger,
+            "Feature grouping update completed successfully (%s groups)",
+            ID - 1,
+            project=project_context,
+        )
         return updated_fig, dropdown_items, dropdown_items_binary, dropdown_items, dropdown_items[0]['value'], dropdown_items_binary[0]['value'], dropdown_items[0]['value']
     
     elif button_id == 'network-intermediate':
@@ -3247,11 +3499,21 @@ def statistical_run(n_clicks, n, sample_threshold):
     global fg_table, fg_table_render, stat_proces_thread, network_updated, updating, loading_progress, pres_sample_threshold
     pres_sample_threshold = sample_threshold
     if network_updated and stat_proces_thread == None:
+        logging_config.log_info(
+            logger,
+            "Statistical tests queued after feature grouping",
+            project=_active_project(),
+        )
         stat_proces_thread = start_run()
         return dash.no_update, None, 0, '0 %', dash.no_update, dash.no_update, 0, '0 %', dash.no_update, dash.no_update
     elif network_updated and stat_proces_thread.is_alive():
         return dash.no_update, None, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update
     elif network_updated and not(stat_proces_thread.is_alive()):
+        logging_config.log_info(
+            logger,
+            "Statistical tests finished",
+            project=_active_project(),
+        )
         stat_proces_thread = None
         network_updated = False
         updating = False
@@ -3259,7 +3521,12 @@ def statistical_run(n_clicks, n, sample_threshold):
     return dash.no_update, None, 0, 100 ,dash.no_update, dash.no_update, 0, 100 ,dash.no_update, dash.no_update
 
 # This method starts the run method in a new thread
-def start_run():    
+def start_run():
+    logging_config.log_info(
+        logger,
+        "Launching statistical test thread",
+        project=_active_project(),
+    )
     thread = threading.Thread(target=generate_stat)
     thread.start()
     return thread
@@ -3297,136 +3564,145 @@ def correction(fg_table):
     return fg_table
 
 # Funciton to realize statistical test or all treatment classes
-def generate_stat():    
+def generate_stat():
     global fg_table, fg_table_render, G, sample_list, project_loaded, meta_intensities, preprocessed_df_raw, preprocessed_df, pres_sample_threshold
 
-    # Creating the feature_group table, resuming the feature groupes main charasteristics
-    fg_table = {'sd_table':[], 'm/z (Da)':[], 'rt (min)':[], 'FG':[], 'Size':[], 'Nodes' : []}
-    test_type = {}
-    for level in sample_list.index:
-        test_type[level] = 'no_test'
-        fg_table[level+' no_test p'] = []
-        fg_table[level+' no_test a'] = []
-        fg_table[level+' no_test np-p'] = []
-    
-    # Iterating through the list L and calculating the averages
-    FG = 1 # correspond to group node (feature group) IDs
-    num_components = len(list(nx.connected_components(G)))
-    for c, component in enumerate(nx.connected_components(G)): # component is a set of ions   
-        global loading_progress
-        loading_progress = int((c/num_components)*100) # for the fg table progress bar
-        # Filter the rows in p_df where feature is in the current set
-        if project_loaded.meta:
-            if meta_intensities:
-                subset_df = preprocessed_df_raw.loc[preprocessed_df_raw['feature'].isin(component)]
-            else:
-                subset_df = preprocessed_df.loc[preprocessed_df['feature'].isin(component)]
-        else:
-            subset_df = preprocessed_df[preprocessed_df.index.isin(component)]
-        max_mass = subset_df['m/z'].max()
-        mean_rt = subset_df['rt'].mean()
-        subset_df = subset_df.drop(columns=['m/z', 'rt'])
-        if project_loaded.meta:
-            subset_df = subset_df.drop(columns=['feature'])
-
-        # Proceed the fg_table creation            
-        sd_table, all_final_means, all_sample_mean, stat_result = stat_n_assumptions(component, sample_list, pres_sample_threshold) 
-        fg_table['m/z (Da)'].append(max_mass)
-        fg_table['rt (min)'].append(round(mean_rt,2))
-        fg_table['FG'].append(FG)
-        fg_table['Size'].append(len(subset_df))
-        fg_table['Nodes'].append(component)
-        
-        colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
-        
-        for level in sample_list.index: # add statistical test results and assumptions validity for each treatment level
-            if stat_result.loc[stat_result['Level'] == level,].any().any(): # if there are stat test for such level      
-                test = stat_result.loc[stat_result['Level'] == level, 'Test_type'].values[0]
-                test_result = float(stat_result.loc[stat_result['Level'] == level, 'Test_p-value'].values[0])
-                assumpion_validity = stat_result.loc[stat_result['Level'] == level, 'Assumption_validity'].values[0]
-                non_param_pvalue = stat_result.loc[stat_result['Level'] == level, 'Non_parametric_p-value'].values[0]
-                
-                # Process fg_table
-                test_type[level] = test # if the first lines have no test
-                if level+f' {test} p' not in fg_table.keys():
-                    existing_values = fg_table[level+' no_test p']
-                    fg_table[level+f' {test} p'] = existing_values
-                    fg_table[level+f' {test} p'].append(test_result)
-                    fg_table.pop(level+' no_test p', None) # delete the no test key
-                    
-                    existing_values = fg_table[level+' no_test a']
-                    fg_table[level+f' {test} a'] = existing_values
-                    fg_table[level+f' {test} a'].append(assumpion_validity)
-                    fg_table.pop(level+' no_test a', None)
-                    
-                    existing_values = fg_table[level+' no_test np-p']
-                    fg_table[level+f' {test} np-p'] = existing_values
-                    fg_table[level+f' {test} np-p'].append(non_param_pvalue)
-                    fg_table.pop(level+' no_test np-p', None)
-                else:
-                    fg_table[level+f' {test} p'].append(test_result)
-                    fg_table[level+f' {test} a'].append(assumpion_validity)
-                    fg_table[level+f' {test} np-p'].append(non_param_pvalue)
-            else:
-                test = test_type[level]
-                fg_table[level+f' {test} p'].append('-')
-                fg_table[level+f' {test} a'].append('-')
-                fg_table[level+f' {test} np-p'].append('-')
-
-        
-        # Define the color of the component (feature group). For each compnent, they are as many stat test as treatment class, so we need to display the color based on the most relevant information, showing green for example if one test is sig and valid
-        for node in component:
-            G.nodes[node]['FG'] = FG
-            G.nodes[node]['color'] = colors[8]
-
-        FG += 1 # feature group id
-        
-        fg_table['sd_table'].append(sd_table)
-      
-    fg_table = pd.DataFrame(fg_table)
-    
-    fg_table = correction(fg_table) # make correction of the p values
-    
-    for ix, row in fg_table.iterrows():
-        color_pattern = [] # to determinate what is the color of the component nodes in the 3D network, first bool is stat test, second are assumptions
+    project_name = _active_project_name()
+    project_context = _active_project()
+    logging_config.log_info(
+        logger,
+        "Statistical tests started",
+        project=project_context,
+    )
+    try:
+        fg_table = {'sd_table':[], 'm/z (Da)':[], 'rt (min)':[], 'FG':[], 'Size':[], 'Nodes' : []}
+        test_type = {}
         for level in sample_list.index:
-            t_type = test_type[level]
-            res = row[f'{level} {t_type} p']
-            if res != '-':
-                test_result = float(row[f'{level} {t_type} p'])
-                assumpion_validity = row[f'{level} {t_type} a']
+            test_type[level] = 'no_test'
+            fg_table[level+' no_test p'] = []
+            fg_table[level+' no_test a'] = []
+            fg_table[level+' no_test np-p'] = []
+
+        colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
+        FG = 1 # correspond to group node (feature group) IDs
+        components = list(nx.connected_components(G))
+        num_components = len(components)
+        for c, component in enumerate(components):
+            global loading_progress
+            loading_progress = int((c/num_components)*100)
+            if project_loaded.meta:
+                if meta_intensities:
+                    subset_df = preprocessed_df_raw.loc[preprocessed_df_raw['feature'].isin(component)]
+                else:
+                    subset_df = preprocessed_df.loc[preprocessed_df['feature'].isin(component)]
             else:
-                test_result = 1
-                assumpion_validity = 'no'
-                non_param_pvalue = 1
-            FG = row['FG']
-            
-            # Define color pattern
-            if test_result <= 0.05 and assumpion_validity == 'yes'  :
-                color_pattern.append('Green') # valid test and assumption valid
-            elif test_result <= 0.05  and assumpion_validity == 'no' :
-                color_pattern.append('Orange') # test valid but not assumption
-            elif test_result >= 0.05  and assumpion_validity == 'yes'  :
-                color_pattern.append('Red') # test not valid while assumptions are
-            elif test_result >= 0.05  and assumpion_validity == 'no' and  float(non_param_pvalue) <= 0.05:
-                color_pattern.append('Blue') # test not valid while assumptions are
-            else:
-                color_pattern.append('Grey') # nothing valid, meaning no significance of the test at all
-        for node in row['Nodes']:
-            # Below we apply the color to all nodes of the component if at least one test have something significant
-            if 'Green' in color_pattern:
-                G.nodes[node]['color'] = colors[2] # correspond to green in Set1
-            elif 'Orange' in color_pattern: # if assumptions are not met but significant
-                G.nodes[node]['color'] = colors[4]
-            elif 'Red' in color_pattern: # if assumptions are met but non significant
-                G.nodes[node]['color'] = colors[0]
-            elif 'Blue' in color_pattern: # when non significant and no assumption, and the on paramteric p value is significant
-                G.nodes[node]['color'] = colors[1]
-            else:
+                subset_df = preprocessed_df[preprocessed_df.index.isin(component)]
+            max_mass = subset_df['m/z'].max()
+            mean_rt = subset_df['rt'].mean()
+            subset_df = subset_df.drop(columns=['m/z', 'rt'])
+            if project_loaded.meta:
+                subset_df = subset_df.drop(columns=['feature'])
+
+            sd_table, all_final_means, all_sample_mean, stat_result = stat_n_assumptions(component, sample_list, pres_sample_threshold)
+            fg_table['m/z (Da)'].append(max_mass)
+            fg_table['rt (min)'].append(round(mean_rt,2))
+            fg_table['FG'].append(FG)
+            fg_table['Size'].append(len(subset_df))
+            fg_table['Nodes'].append(component)
+
+            for level in sample_list.index:
+                if stat_result.loc[stat_result['Level'] == level,].any().any():
+                    test = stat_result.loc[stat_result['Level'] == level, 'Test_type'].values[0]
+                    test_result = float(stat_result.loc[stat_result['Level'] == level, 'Test_p-value'].values[0])
+                    assumpion_validity = stat_result.loc[stat_result['Level'] == level, 'Assumption_validity'].values[0]
+                    non_param_pvalue = stat_result.loc[stat_result['Level'] == level, 'Non_parametric_p-value'].values[0]
+                    test_type[level] = test
+                    if level+f' {test} p' not in fg_table.keys():
+                        existing_values = fg_table[level+' no_test p']
+                        fg_table[level+f' {test} p'] = existing_values
+                        fg_table[level+f' {test} p'].append(test_result)
+                        fg_table.pop(level+' no_test p', None)
+
+                        existing_values = fg_table[level+' no_test a']
+                        fg_table[level+f' {test} a'] = existing_values
+                        fg_table[level+f' {test} a'].append(assumpion_validity)
+                        fg_table.pop(level+' no_test a', None)
+
+                        existing_values = fg_table[level+' no_test np-p']
+                        fg_table[level+f' {test} np-p'] = existing_values
+                        fg_table[level+f' {test} np-p'].append(non_param_pvalue)
+                        fg_table.pop(level+' no_test np-p', None)
+                    else:
+                        fg_table[level+f' {test} p'].append(test_result)
+                        fg_table[level+f' {test} a'].append(assumpion_validity)
+                        fg_table[level+f' {test} np-p'].append(non_param_pvalue)
+                else:
+                    test = test_type[level]
+                    fg_table[level+f' {test} p'].append('-')
+                    fg_table[level+f' {test} a'].append('-')
+                    fg_table[level+f' {test} np-p'].append('-')
+
+            for node in component:
+                G.nodes[node]['FG'] = FG
                 G.nodes[node]['color'] = colors[8]
-    fg_table = fg_table.drop(columns = ['Nodes'])
-    fg_table_render = fg_table.copy(deep=True)
-    return 'Done'
+
+            FG += 1
+            fg_table['sd_table'].append(sd_table)
+
+        fg_table = pd.DataFrame(fg_table)
+        fg_table = correction(fg_table)
+
+        for ix, row in fg_table.iterrows():
+            color_pattern = []
+            for level in sample_list.index:
+                t_type = test_type[level]
+                res = row[f'{level} {t_type} p']
+                if res != '-':
+                    test_result = float(row[f'{level} {t_type} p'])
+                    assumpion_validity = row[f'{level} {t_type} a']
+                else:
+                    test_result = 1
+                    assumpion_validity = 'no'
+                    non_param_pvalue = 1
+                FG = row['FG']
+                if test_result <= 0.05 and assumpion_validity == 'yes':
+                    color_pattern.append('Green')
+                elif test_result <= 0.05 and assumpion_validity == 'no':
+                    color_pattern.append('Orange')
+                elif test_result >= 0.05 and assumpion_validity == 'yes':
+                    color_pattern.append('Red')
+                elif test_result >= 0.05 and assumpion_validity == 'no' and float(non_param_pvalue) <= 0.05:
+                    color_pattern.append('Blue')
+                else:
+                    color_pattern.append('Grey')
+            for node in row['Nodes']:
+                if 'Green' in color_pattern:
+                    G.nodes[node]['color'] = colors[2]
+                elif 'Orange' in color_pattern:
+                    G.nodes[node]['color'] = colors[4]
+                elif 'Red' in color_pattern:
+                    G.nodes[node]['color'] = colors[0]
+                elif 'Blue' in color_pattern:
+                    G.nodes[node]['color'] = colors[1]
+                else:
+                    G.nodes[node]['color'] = colors[8]
+        fg_table = fg_table.drop(columns = ['Nodes'])
+        fg_table_render = fg_table.copy(deep=True)
+        logging_config.log_info(
+            logger,
+            "Statistical tests completed for %s feature groups",
+            len(fg_table['FG']),
+            project=project_context,
+        )
+        return 'Done'
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logging_config.log_exception(
+            logger,
+            "Statistical tests failed",
+            project=project_context,
+            exception=exc,
+        )
+        raise
 
 
 

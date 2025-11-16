@@ -255,6 +255,7 @@ class Project():
             self.msn_df_path = None
             self.msn_df_deblanked = None
             self.msn_df_deblanked_path = None
+            self.shape_store_path = None
             # Parameters for template and meta analysis
             self.meta = None
             self.template_path = {}
@@ -301,8 +302,9 @@ class Project():
                 self.featurepath = loaded_project.featurepath
                 self.plotpath = loaded_project.plotpath
                 self.files_spectra = loaded_project.files_spectra
-                self.files_path = loaded_project.files_path 
+                self.files_path = loaded_project.files_path
                 self.featurelist = loaded_project.featurelist
+                self.shape_store_path = getattr(loaded_project, 'shape_store_path', None)
                 self.project_file = True
                 self.log = loaded_project.log
                 self.noise_trace_threshold = loaded_project.noise_trace_threshold 
