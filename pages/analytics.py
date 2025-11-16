@@ -13,13 +13,14 @@ This file creates a Dash app. It displays multiple tools for statistical anayzes
 ###############################################################################
 import os
 import re
+import json
 import dash
 import scipy
 import warnings
 import itertools
 import threading
 import scipy.stats
-from typing import Optional
+from typing import Dict, List, Optional
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -41,12 +42,7 @@ from sklearn.cross_decomposition import PLSRegression
 from statsmodels.stats.multitest import multipletests
 from statsmodels.stats.multicomp import pairwise_tukeyhsd
 from dash import html, dcc, dash_table, callback_context, callback
-
-from Modules.peak_shape import (
-    PeakShapeVectors,
-    build_peak_shape_vectors,
-    peak_shape_similarity,
-)
+import lz4.frame
 
 cache = Cache('./disk_cache')
 
@@ -116,7 +112,14 @@ def add_zeros(Df, Samples): # Df is featurelist, meaning msn_df_deblanked, Sampl
     
     # Columns to copy from existing rows
     columns_to_copy = ['feature', 'rt', 'm/z', 'MS_level']
-    default_values = {col: 0 for col in Df.columns if col not in columns_to_copy + ['sample', 'mzml_name']}
+    default_values = {}
+    for col in Df.columns:
+        if col in columns_to_copy + ['sample', 'mzml_name']:
+            continue
+        if col == 'shape_id':
+            default_values[col] = None
+        else:
+            default_values[col] = 0
     
     # Create a new dataframe to hold the complete data
     new_rows = []
@@ -379,8 +382,9 @@ G = nx.Graph() # Create the G network, meaning the python object for feature net
 S = nx.Graph() # Network for the meta feature grouping
 ion_df = None
 ion_df_raw = None
-peak_shape_vectors: Optional[PeakShapeVectors] = None
-peak_shape_vectors_raw: Optional[PeakShapeVectors] = None
+shape_vector_store: Dict[str, np.ndarray] = {}
+feature_shape_vectors: Dict[str, np.ndarray] = {}
+SHAPE_VECTOR_POINTS = 80
 levels = None
 loading_progress = None
 meta_intensities = None
@@ -407,6 +411,135 @@ updating = False
 validity = False
 volcano_feature_groups = None
 
+
+def _shape_payload_to_vector(shape_payload) -> Optional[np.ndarray]:
+    if (
+        not isinstance(shape_payload, (list, tuple))
+        or len(shape_payload) != 2
+    ):
+        return None
+    rts, intensities = shape_payload
+    if not rts or not intensities:
+        return None
+    rts_array = np.asarray(rts, dtype=float)
+    intensities_array = np.asarray(intensities, dtype=float)
+    mask = np.isfinite(rts_array) & np.isfinite(intensities_array)
+    if mask.sum() < 3:
+        return None
+    rts_array = rts_array[mask]
+    intensities_array = intensities_array[mask]
+    order = np.argsort(rts_array)
+    rts_array = rts_array[order]
+    intensities_array = intensities_array[order]
+    apex_index = int(np.argmax(intensities_array))
+    apex_rt = rts_array[apex_index]
+    centered_rts = rts_array - apex_rt
+    max_abs_rt = np.max(np.abs(centered_rts))
+    if max_abs_rt > 0:
+        normalized_rts = centered_rts / max_abs_rt
+    else:
+        normalized_rts = centered_rts
+    intensities_mean = intensities_array.mean()
+    intensities_std = intensities_array.std()
+    if intensities_std > 0:
+        normalized_intensities = (intensities_array - intensities_mean) / intensities_std
+    else:
+        normalized_intensities = intensities_array - intensities_mean
+    grid = np.linspace(-1.0, 1.0, SHAPE_VECTOR_POINTS)
+    vector = np.interp(
+        grid,
+        normalized_rts,
+        normalized_intensities,
+        left=0.0,
+        right=0.0,
+    )
+    norm = np.linalg.norm(vector)
+    if norm == 0:
+        return None
+    return vector / norm
+
+
+def _load_shape_vector_store(store_path: Optional[str]) -> Dict[str, np.ndarray]:
+    vectors: Dict[str, np.ndarray] = {}
+    if not store_path or not os.path.isfile(store_path):
+        return vectors
+    try:
+        with lz4.frame.open(store_path, mode="rt", encoding="utf-8") as handle:
+            for line in handle:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                shape_id = record.get("shape_id")
+                vector = _shape_payload_to_vector(record.get("shape"))
+                if shape_id and vector is not None:
+                    vectors[str(shape_id)] = vector
+    except OSError:
+        print("Unable to load chromatographic shapes; continuing without shape refinement.")
+    return vectors
+
+
+def _build_feature_shape_vector_index(
+    feature_df: Optional[pd.DataFrame],
+    shape_vectors: Dict[str, np.ndarray],
+) -> Dict[str, np.ndarray]:
+    feature_vectors: Dict[str, np.ndarray] = {}
+    if (
+        feature_df is None
+        or shape_vectors is None
+        or not shape_vectors
+        or 'shape_id' not in feature_df.columns
+    ):
+        return feature_vectors
+    mapping = (
+        feature_df[['feature', 'shape_id']]
+        .dropna(subset=['shape_id'])
+        .copy(deep=True)
+    )
+    if mapping.empty:
+        return feature_vectors
+    mapping['shape_id'] = mapping['shape_id'].astype(str)
+    for feature, group in mapping.groupby('feature'):
+        vectors = [
+            shape_vectors.get(shape_id)
+            for shape_id in group['shape_id']
+            if shape_id in shape_vectors
+        ]
+        vectors = [vec for vec in vectors if vec is not None]
+        if not vectors:
+            continue
+        stacked = np.vstack(vectors)
+        mean_vector = stacked.mean(axis=0)
+        norm = np.linalg.norm(mean_vector)
+        if norm > 0:
+            mean_vector = mean_vector / norm
+        feature_vectors[feature] = mean_vector
+    return feature_vectors
+
+
+def _initialize_shape_vectors(feature_df: Optional[pd.DataFrame]):
+    global shape_vector_store, feature_shape_vectors, project_loaded
+    store_path = getattr(project_loaded, 'shape_store_path', None)
+    shape_vector_store = _load_shape_vector_store(store_path)
+    feature_shape_vectors = _build_feature_shape_vector_index(
+        feature_df,
+        shape_vector_store,
+    )
+
+
+def _refresh_feature_shape_vectors(feature_df: Optional[pd.DataFrame]):
+    global feature_shape_vectors, shape_vector_store
+    if not shape_vector_store:
+        feature_shape_vectors = {}
+        return
+    feature_shape_vectors = _build_feature_shape_vector_index(
+        feature_df,
+        shape_vector_store,
+    )
+
 def initiate_project(Project):
     global featurelist, featurelist_raw, featurepath, featurelistname
     global treatment, project_loaded
@@ -415,7 +548,7 @@ def initiate_project(Project):
     global levels, sample_list, sample_list_raw, all_treatments, treatment_selection
     global dropdown_items, dropdown_items_binary
     global fg_table, fg_table_render
-    global peak_shape_vectors, peak_shape_vectors_raw
+    global shape_vector_store, feature_shape_vectors
     
     project_loaded = Project
     featurelist = project_loaded.msn_df_deblanked
@@ -441,14 +574,7 @@ def initiate_project(Project):
     featurelist_raw = featurelist.copy(deep=True) # back up of the variable, necessary for the filtering option tool
     featurepath = project_loaded.featurepath
     featurelistname = project_loaded.name
-
-    peak_shape_vectors = build_peak_shape_vectors(featurelist)
-    if peak_shape_vectors is not None:
-        peak_shape_vectors_raw = PeakShapeVectors(
-            vectors=peak_shape_vectors.vectors.copy(deep=True)
-        )
-    else:
-        peak_shape_vectors_raw = None
+    _initialize_shape_vectors(featurelist)
     
 
     # Add the rt and m/z values for each feature
@@ -552,7 +678,7 @@ def initiate_project_meta(Project):
     global dropdown_items, dropdown_items_binary
     global S, FG_pair_shared_features, potential_neutral_masses_groups
     global fg_table, fg_table_render
-    global peak_shape_vectors, peak_shape_vectors_raw
+    global shape_vector_store, feature_shape_vectors
     
     project_loaded = Project
     
@@ -564,13 +690,7 @@ def initiate_project_meta(Project):
     featurelist = featurelist.drop([col for col in featurelist.columns if not col or col.strip() == ''], axis=1)
     featurelist = featurelist.drop(columns = ['label'])
     featurelist_raw = featurelist.copy(deep=True)
-    peak_shape_vectors = build_peak_shape_vectors(featurelist)
-    if peak_shape_vectors is not None:
-        peak_shape_vectors_raw = PeakShapeVectors(
-            vectors=peak_shape_vectors.vectors.copy(deep=True)
-        )
-    else:
-        peak_shape_vectors_raw = None
+    _initialize_shape_vectors(featurelist)
     treatment = project_loaded.treatment
     fg_table, fg_table_render = None, pd.DataFrame() 
     # Find the list of sampels (without blank)
@@ -937,7 +1057,7 @@ main_layout =  html.Div([
                         dbc.InputGroup(
                             [dbc.InputGroupText("Shape Corr.", id='shape-input'),
                              dbc.Input(id='shape-threshold',
-                                       type="number", value=0.7, step=0.01, min=-1, max=1)],
+                                       type="number", value=0.7, step=0.01, min=0, max=1)],
                             size="sm"
                                 ),
                         dbc.Tooltip(
@@ -949,7 +1069,7 @@ main_layout =  html.Div([
                             target="spearman-input",  # ID of the component to which the tooltip is attached
                             placement="top"),
                         dbc.Tooltip(
-                            "Cosine similarity of chromatographic-shape descriptors. Set to 0 to ignore the shape filter.",
+                            "Minimum chromatographic-shape similarity used to subdivide feature groups after the network step. Set to 0 to skip the shape refinement stage.",
                             target="shape-input",
                             placement="top")], style={'display': 'flex','margin-bottom': '10px'}),
                     html.Div([
@@ -1549,7 +1669,7 @@ def display_options(Click = None): # Click is a None value when the filtering op
 # Function to remove or add (filter) treatments from the filtering options. Treatment variable are all treatment which are selected
 def filter_sample(Treatments):
     global featurelist, all_treatments, sample_list, preprocessed_df, featurelist
-    global dropdown_items, dropdown_items_binary, peak_shape_vectors
+    global dropdown_items, dropdown_items_binary
     raw_values = [t['value'] for t in all_treatments] # here are all the treatments no matter the levels, in a list
     to_filter = []
     for t in raw_values:
@@ -1566,7 +1686,7 @@ def filter_sample(Treatments):
     preprocessed_df.drop(sample_removed, axis=1, inplace=True)
     stand_preprocessed_df.drop(sample_removed, axis=1, inplace=True)
     featurelist = featurelist[~featurelist['sample'].isin(sample_removed)]
-    peak_shape_vectors = build_peak_shape_vectors(featurelist)
+    _refresh_feature_shape_vectors(featurelist)
     dropdown_items, dropdown_items_binary  = dropdowns(sample_list)
     
 
@@ -1583,7 +1703,6 @@ def update_samples(Selected_treatments):
     global sample_list, dropdown_items, dropdown_items_binary
     global preprocessed_df, stand_preprocessed_df
     global featurelist
-    global peak_shape_vectors, peak_shape_vectors_raw
     global treatment_selection
     
     if trigger == 'filter-treatment':
@@ -1596,12 +1715,7 @@ def update_samples(Selected_treatments):
         featurelist = featurelist_raw.copy(deep=True)
         stand_preprocessed_df = stand_preprocessed_df_raw.copy(deep=True)
         dropdown_items, dropdown_items_binary = dropdowns(sample_list)
-        if peak_shape_vectors_raw is not None:
-            peak_shape_vectors = PeakShapeVectors(
-                vectors=peak_shape_vectors_raw.vectors.copy(deep=True)
-            )
-        else:
-            peak_shape_vectors = None
+        _refresh_feature_shape_vectors(featurelist)
         # Step 2: Adapt sample list
         filter_sample(Selected_treatments)
         
@@ -2594,6 +2708,51 @@ def _group_size_counts(graph):
     cnt = collections.Counter(sizes)  # {size: how_many_groups}
     return len(sizes), cnt
 
+
+def _refine_component_by_shape(component_nodes, threshold, graph):
+    if threshold <= 0 or not feature_shape_vectors:
+        return [set(component_nodes)]
+    nodes = set(component_nodes)
+    available = []
+    missing = []
+    for node in nodes:
+        vector = feature_shape_vectors.get(node)
+        if vector is None:
+            missing.append(node)
+        else:
+            available.append((node, vector))
+    if len(available) < 2:
+        return [set(nodes)]
+    H = nx.Graph()
+    H.add_nodes_from(node for node, _ in available)
+    for idx, (node_i, vec_i) in enumerate(available):
+        for jdx in range(idx + 1, len(available)):
+            node_j, vec_j = available[jdx]
+            norm_i = np.linalg.norm(vec_i)
+            norm_j = np.linalg.norm(vec_j)
+            if norm_i == 0 or norm_j == 0:
+                continue
+            similarity = float(np.dot(vec_i, vec_j) / (norm_i * norm_j))
+            if similarity >= threshold:
+                H.add_edge(node_i, node_j, weight=similarity)
+    shape_components = [set(comp) for comp in nx.connected_components(H)]
+    if len(shape_components) <= 1:
+        return [set(nodes)]
+    for node in missing:
+        neighbors = set(graph.neighbors(node)).intersection(nodes)
+        if neighbors:
+            best_idx = 0
+            best_overlap = -1
+            for idx, comp in enumerate(shape_components):
+                overlap = len(neighbors & comp)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_idx = idx
+            shape_components[best_idx].add(node)
+        else:
+            shape_components[0].add(node)
+    return shape_components
+
 # Callback for updating the network graph
 @callback(
     [Output('network-graph', 'figure'),
@@ -2617,7 +2776,7 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     global stand_ion_df, ion_df, ion_df_raw
     global dropdown_items_binary, dropdown_items, fg_table, fg_table_render
     global validity, project_loaded, featurelist, meta_intensities
-    global peak_shape_vectors
+    global feature_shape_vectors
     
     ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
@@ -2625,8 +2784,8 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     if Shape_threshold is None:
         Shape_threshold = 0.0
     else:
-        Shape_threshold = max(-1.0, min(1.0, Shape_threshold))
-    apply_shape_filter = Shape_threshold > 0 and peak_shape_vectors is not None
+        Shape_threshold = max(0.0, min(1.0, Shape_threshold))
+    shape_refinement_enabled = Shape_threshold > 0 and bool(feature_shape_vectors)
 
     if validity == False:
         raise PreventUpdate()
@@ -2687,7 +2846,7 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
         ratio_matrix = pd.DataFrame(ratio_matrix, index=valid_rows_df.index, columns=valid_rows_df.index)
         
         # Create the edges list
-        edges = []  # edges list with correlation and shape similarity details
+        edges = []  # edges list with correlation details
         # Iterate over the pairs in pairs_df
         for _, row in pairs_df.iterrows():
             feature = row['feature']
@@ -2703,22 +2862,11 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
                     and ratio_value >= minimum_ratio_threshold
                     and rt_diff <= Rt_threshold
                 ):
-                    shape_score = peak_shape_similarity(
-                        peak_shape_vectors, feature, other_feature
-                    )
-                    if shape_score is None:
-                        shape_score = 1.0
-                    if apply_shape_filter and shape_score < Shape_threshold:
-                        continue
-                    weight_shape = shape_score if apply_shape_filter else 1.0
-                    edge_weight = corr_value * max(weight_shape, 0.0)
                     edges.append(
                         (
                             feature,
                             other_feature,
-                            edge_weight,
                             corr_value,
-                            shape_score,
                         )
                     )
 
@@ -2729,13 +2877,12 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
             G.nodes[node]['rt'] = preprocessed_df.loc[node, 'rt']
             
         # Add edges with correlation as edge attribute
-        for feature, other_feature, weight, corr_value, shape_score in edges:
+        for feature, other_feature, weight in edges:
             G.add_edge(
                 feature,
                 other_feature,
                 weight=weight,
-                correlation=corr_value,
-                shape_similarity=shape_score,
+                correlation=weight,
             )
         G_before = G.copy()
         total_before, counts_before = _group_size_counts(G_before)
@@ -2797,38 +2944,48 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
 
         # Iterating through the list L and calculating the averages
         ID = 1 # correspond to group node (feature group) IDs
-        for component in nx.connected_components(G): # component is a set of ions   
-            # Filter the rows in p_df where feature is in the current set
-            subset_df = preprocessed_df[preprocessed_df.index.isin(component)]
-            stand_subset_df = stand_preprocessed_df[stand_preprocessed_df.index.isin(component)]
-            max_mass = subset_df['m/z'].max()
-            mean_rt = subset_df['rt'].mean()
-            subset_df = subset_df.drop(columns=['m/z', 'rt'])
-            stand_subset_df = stand_subset_df.drop(columns=['m/z', 'rt'])
-        
-            # Calculate the average of the filtered rows (excluding the 'feature' column)
-            avg_row = subset_df.mean(numeric_only=True).to_frame().transpose()
-            stand_avg_row = stand_subset_df.mean(numeric_only=True).to_frame().transpose()
-            
-            avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
-            avg_row['rt'] = mean_rt
-            avg_row['Size'] = len(subset_df) # number of features present
-            avg_row['FG'] = ID
-            stand_avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
-            stand_avg_row['rt'] = mean_rt
-            stand_avg_row['Size'] = len(subset_df) # number of features present
-            stand_avg_row['FG'] = ID
-            
-            # Now perform the concatenation
-            ion_df = pd.concat([ion_df, avg_row], ignore_index=True)
-            stand_ion_df = pd.concat([stand_ion_df, stand_avg_row], ignore_index=True)
-    
-            colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
-            for node in component:
-                G.nodes[node]['feature_group'] = ID
-                G.nodes[node]['color'] = colors[8] # color is grey for the moment, because stats test are loading i background
-                    
-            ID += 1 # feature group id
+        for component in nx.connected_components(G): # component is a set of ions
+            if shape_refinement_enabled:
+                refined_components = _refine_component_by_shape(
+                    component,
+                    Shape_threshold,
+                    G,
+                )
+            else:
+                refined_components = [set(component)]
+            for refined_nodes in refined_components:
+                subset_df = preprocessed_df[preprocessed_df.index.isin(refined_nodes)]
+                stand_subset_df = stand_preprocessed_df[stand_preprocessed_df.index.isin(refined_nodes)]
+                if subset_df.empty or stand_subset_df.empty:
+                    continue
+                max_mass = subset_df['m/z'].max()
+                mean_rt = subset_df['rt'].mean()
+                subset_df = subset_df.drop(columns=['m/z', 'rt'])
+                stand_subset_df = stand_subset_df.drop(columns=['m/z', 'rt'])
+
+                # Calculate the average of the filtered rows (excluding the 'feature' column)
+                avg_row = subset_df.mean(numeric_only=True).to_frame().transpose()
+                stand_avg_row = stand_subset_df.mean(numeric_only=True).to_frame().transpose()
+
+                avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
+                avg_row['rt'] = mean_rt
+                avg_row['Size'] = len(subset_df) # number of features present
+                avg_row['FG'] = ID
+                stand_avg_row['m/z'] = max_mass # highest mass is the reference mass, because it is more likely to be the closet to the precusor ion mass
+                stand_avg_row['rt'] = mean_rt
+                stand_avg_row['Size'] = len(subset_df) # number of features present
+                stand_avg_row['FG'] = ID
+
+                # Now perform the concatenation
+                ion_df = pd.concat([ion_df, avg_row], ignore_index=True)
+                stand_ion_df = pd.concat([stand_ion_df, stand_avg_row], ignore_index=True)
+
+                colors = px.colors.qualitative.Set1 # import colors (https://plotly.com/python/discrete-color/)
+                for node in refined_nodes:
+                    G.nodes[node]['feature_group'] = ID
+                    G.nodes[node]['color'] = colors[8] # color is grey for the moment, because stats test are loading i background
+
+                ID += 1 # feature group id
     
         # Convert the updated graph to a Plotly figure
         ion_df_raw = ion_df.copy(deep=True)
