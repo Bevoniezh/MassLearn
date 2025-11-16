@@ -206,6 +206,59 @@ def _spectra_dicts_from_peaks(spectra: cleaning.Spectra) -> tuple[dict, dict]:
     return ms1, ms2
 
 
+def _ensure_spectra_cache(project, project_context=None) -> dict:
+    """Return a populated ``files_spectra`` cache, rebuilding it if necessary."""
+
+    files_spectra = getattr(project, "files_spectra", {}) or {}
+    if files_spectra:
+        return files_spectra
+
+    mzml_paths = getattr(project, "mzml_files_path", []) or []
+    if not mzml_paths:
+        return {}
+
+    logging_config.log_info(
+        logger,
+        "No cached spectra found for project %s; rebuilding chromatographic cache from %d mzML files.",
+        getattr(project, "name", "unknown"),
+        len(mzml_paths),
+        project=project_context,
+    )
+
+    rebuilt_cache: dict = {}
+    ms1_noise = getattr(project, "ms1_noise", 0) or 0
+    ms2_noise = getattr(project, "ms2_noise", 0) or 0
+
+    for mzml_path in mzml_paths:
+        sample_name = _normalize_sample_name(os.path.splitext(os.path.basename(mzml_path))[0])
+        if not sample_name:
+            continue
+        try:
+            spectra = cleaning.Spectra(mzml_path)
+            spectra.extract_peaks(ms1_noise, ms2_noise)
+            rebuilt_cache[sample_name] = _spectra_dicts_from_peaks(spectra)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logging_config.log_exception(
+                logger,
+                "Failed to rebuild chromatographic cache for %s",
+                sample_name or mzml_path,
+                project=project_context,
+                exception=exc,
+            )
+
+    if rebuilt_cache:
+        project.files_spectra = rebuilt_cache
+        cache.set('project_loaded', project)
+    else:
+        logging_config.log_warning(
+            logger,
+            "Unable to rebuild chromatographic cache; chromatographic shapes will stay disabled.",
+            project=project_context,
+        )
+
+    return rebuilt_cache
+
+
 def _normalize_sample_name(sample_value) -> str:
     """Return a normalized sample identifier stripped from paths and suffixes."""
 
@@ -471,7 +524,7 @@ def _export_feature_shapes(
     if feature_df is None or feature_df.empty:
         return pd.Series(dtype="object"), None
 
-    files_spectra = getattr(current_project, "files_spectra", {}) or {}
+    files_spectra = _ensure_spectra_cache(current_project, project_context)
 
     logging_config.log_info(
         logger,
