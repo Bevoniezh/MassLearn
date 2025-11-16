@@ -418,20 +418,26 @@ validity = False
 volcano_feature_groups = None
 
 
+def _active_project():
+    return project_loaded
+
+
 def _active_project_name() -> Optional[str]:
-    if project_loaded is None:
+    project = _active_project()
+    if project is None:
         return None
-    return getattr(project_loaded, 'project_name', getattr(project_loaded, 'name', None))
+    return getattr(project, 'project_name', getattr(project, 'name', None))
 
 
 @contextmanager
 def _feature_grouping_step_logger(step_name: str):
     project_name = _active_project_name()
+    project_context = _active_project()
     logging_config.log_info(
         logger,
         "Feature grouping step started: %s",
         step_name,
-        project=project_name,
+        project=project_context,
     )
     try:
         yield
@@ -440,7 +446,7 @@ def _feature_grouping_step_logger(step_name: str):
             logger,
             "Feature grouping step failed: %s",
             step_name,
-            project=project_name,
+            project=project_context,
             exception=exc,
         )
         raise
@@ -449,7 +455,7 @@ def _feature_grouping_step_logger(step_name: str):
             logger,
             "Feature grouping step completed: %s",
             step_name,
-            project=project_name,
+            project=project_context,
         )
 
 
@@ -2755,12 +2761,13 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
         return [set(component_nodes)]
     nodes = set(component_nodes)
     project_name = _active_project_name()
+    project_context = _active_project()
     logging_config.log_info(
         logger,
         "Shape refinement started for component (%s nodes, threshold=%.2f)",
         len(nodes),
         threshold,
-        project=project_name,
+        project=project_context,
     )
     available = []
     missing = []
@@ -2775,7 +2782,7 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
             logger,
             "Shape refinement skipped for component (%s nodes) due to insufficient vectors",
             len(nodes),
-            project=project_name,
+            project=project_context,
         )
         return [set(nodes)]
     try:
@@ -2797,7 +2804,7 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
                 logger,
                 "Shape refinement produced a single subset for component (%s nodes)",
                 len(nodes),
-                project=project_name,
+                project=project_context,
             )
             return [set(nodes)]
         for node in missing:
@@ -2818,7 +2825,7 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
             "Shape refinement completed for component (%s nodes) with %s refined groups",
             len(nodes),
             len(shape_components),
-            project=project_name,
+            project=project_context,
         )
         return shape_components
     except Exception as exc:  # pragma: no cover - defensive logging
@@ -2826,7 +2833,7 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
             logger,
             "Shape refinement failed for component (%s nodes)",
             len(nodes),
-            project=project_name,
+            project=project_context,
             exception=exc,
         )
         return [set(nodes)]
@@ -2885,13 +2892,14 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     if button_id == 'update-button' and not (project_loaded.meta == True):
         updating = True
         project_name = _active_project_name()
+        project_context = _active_project()
         logging_config.log_info(
             logger,
             "Feature grouping update requested (RT=%.2f, Corr=%.2f, Shape=%.2f)",
             Rt_threshold,
             Correlation_threshold,
             Shape_threshold,
-            project=project_name,
+            project=project_context,
         )
         # Recreate the network graph based on new threshold values
         G.clear()  # Reset the graph
@@ -3015,7 +3023,7 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
                 logger,
                 "Feature grouping Louvain summary saved to %s",
                 out_csv,
-                project=project_name,
+                project=project_context,
             )
 
             isolated_nodes = [node for node, degree in G.degree() if degree == 0]
@@ -3381,7 +3389,7 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
             logger,
             "Feature grouping update completed successfully (%s groups)",
             ID - 1,
-            project=project_name,
+            project=project_context,
         )
         return updated_fig, dropdown_items, dropdown_items_binary, dropdown_items, dropdown_items[0]['value'], dropdown_items_binary[0]['value'], dropdown_items[0]['value']
     
@@ -3494,7 +3502,7 @@ def statistical_run(n_clicks, n, sample_threshold):
         logging_config.log_info(
             logger,
             "Statistical tests queued after feature grouping",
-            project=_active_project_name(),
+            project=_active_project(),
         )
         stat_proces_thread = start_run()
         return dash.no_update, None, 0, '0 %', dash.no_update, dash.no_update, 0, '0 %', dash.no_update, dash.no_update
@@ -3504,7 +3512,7 @@ def statistical_run(n_clicks, n, sample_threshold):
         logging_config.log_info(
             logger,
             "Statistical tests finished",
-            project=_active_project_name(),
+            project=_active_project(),
         )
         stat_proces_thread = None
         network_updated = False
@@ -3517,7 +3525,7 @@ def start_run():
     logging_config.log_info(
         logger,
         "Launching statistical test thread",
-        project=_active_project_name(),
+        project=_active_project(),
     )
     thread = threading.Thread(target=generate_stat)
     thread.start()
@@ -3560,10 +3568,11 @@ def generate_stat():
     global fg_table, fg_table_render, G, sample_list, project_loaded, meta_intensities, preprocessed_df_raw, preprocessed_df, pres_sample_threshold
 
     project_name = _active_project_name()
+    project_context = _active_project()
     logging_config.log_info(
         logger,
         "Statistical tests started",
-        project=project_name,
+        project=project_context,
     )
     try:
         fg_table = {'sd_table':[], 'm/z (Da)':[], 'rt (min)':[], 'FG':[], 'Size':[], 'Nodes' : []}
@@ -3683,14 +3692,14 @@ def generate_stat():
             logger,
             "Statistical tests completed for %s feature groups",
             len(fg_table['FG']),
-            project=project_name,
+            project=project_context,
         )
         return 'Done'
     except Exception as exc:  # pragma: no cover - defensive logging
         logging_config.log_exception(
             logger,
             "Statistical tests failed",
-            project=project_name,
+            project=project_context,
             exception=exc,
         )
         raise
