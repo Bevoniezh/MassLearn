@@ -207,7 +207,7 @@ def _spectra_dicts_from_peaks(spectra: cleaning.Spectra) -> tuple[dict, dict]:
 
 
 def _normalize_sample_name(sample_value) -> str:
-    """Return a normalized sample identifier without the .mzML suffix."""
+    """Return a normalized sample identifier stripped from paths and suffixes."""
 
     if sample_value is None:
         return ""
@@ -216,9 +216,20 @@ def _normalize_sample_name(sample_value) -> str:
             return ""
     except TypeError:
         pass
+
     sample = str(sample_value).strip()
+    if not sample:
+        return ""
+
+    # Columns exported by MZmine sometimes contain the absolute path of the
+    # input mzML.  Keep only the file name part so it matches the cache keys
+    # produced earlier in the pipeline.
+    sample = sample.replace("\\", "/")
+    sample = sample.rsplit("/", 1)[-1]
+
     if sample.lower().endswith(".mzml"):
         sample = sample[:-5]
+
     return sample
 
 
