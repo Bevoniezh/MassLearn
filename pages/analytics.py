@@ -390,6 +390,7 @@ ion_df = None
 ion_df_raw = None
 shape_vector_store: Dict[str, np.ndarray] = {}
 feature_shape_vectors: Dict[str, np.ndarray] = {}
+shape_record_store: Dict[str, dict] = {}
 SHAPE_VECTOR_POINTS = 80
 levels = None
 loading_progress = None
@@ -506,10 +507,32 @@ def _shape_payload_to_vector(shape_payload) -> Optional[np.ndarray]:
     return vector / norm
 
 
-def _load_shape_vector_store(store_path: Optional[str]) -> Dict[str, np.ndarray]:
-    vectors: Dict[str, np.ndarray] = {}
+def _sanitize_shape_payload(shape_payload) -> Optional[tuple]:
+    if (
+        not isinstance(shape_payload, (list, tuple))
+        or len(shape_payload) != 2
+    ):
+        return None
+    rts, intensities = shape_payload
+    if not rts or not intensities:
+        return None
+    rts_array = np.asarray(rts, dtype=float)
+    intensities_array = np.asarray(intensities, dtype=float)
+    mask = np.isfinite(rts_array) & np.isfinite(intensities_array)
+    if mask.sum() < 2:
+        return None
+    rts_array = rts_array[mask]
+    intensities_array = intensities_array[mask]
+    order = np.argsort(rts_array)
+    rts_array = rts_array[order]
+    intensities_array = intensities_array[order]
+    return rts_array.tolist(), intensities_array.tolist()
+
+
+def _load_shape_record_store(store_path: Optional[str]) -> Dict[str, dict]:
+    records: Dict[str, dict] = {}
     if not store_path or not os.path.isfile(store_path):
-        return vectors
+        return records
     try:
         with lz4.frame.open(store_path, mode="rt", encoding="utf-8") as handle:
             for line in handle:
@@ -521,11 +544,51 @@ def _load_shape_vector_store(store_path: Optional[str]) -> Dict[str, np.ndarray]
                 except json.JSONDecodeError:
                     continue
                 shape_id = record.get("shape_id")
-                vector = _shape_payload_to_vector(record.get("shape"))
-                if shape_id and vector is not None:
-                    vectors[str(shape_id)] = vector
+                cleaned_shape = _sanitize_shape_payload(record.get("shape"))
+                if not shape_id or cleaned_shape is None:
+                    continue
+                record["shape"] = cleaned_shape
+                records[str(shape_id)] = record
     except OSError:
         print("Unable to load chromatographic shapes; continuing without shape refinement.")
+    return records
+
+
+def _load_shape_vector_store(
+    store_path: Optional[str],
+    record_store: Optional[Dict[str, dict]] = None,
+) -> Dict[str, np.ndarray]:
+    vectors: Dict[str, np.ndarray] = {}
+    source_records = None
+    if record_store:
+        source_records = record_store.items()
+    elif store_path and os.path.isfile(store_path):
+        try:
+            parsed_records = []
+            with lz4.frame.open(store_path, mode="rt", encoding="utf-8") as handle:
+                for line in handle:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    parsed_records.append((record.get("shape_id"), record.get("shape")))
+            source_records = parsed_records
+        except OSError:
+            print("Unable to load chromatographic shapes; continuing without shape refinement.")
+            return vectors
+    else:
+        return vectors
+
+    for shape_id, payload in source_records:
+        if record_store is not None:
+            vector = _shape_payload_to_vector(payload.get("shape"))
+        else:
+            vector = _shape_payload_to_vector(payload)
+        if shape_id and vector is not None:
+            vectors[str(shape_id)] = vector
     return vectors
 
 
@@ -568,9 +631,10 @@ def _build_feature_shape_vector_index(
 
 
 def _initialize_shape_vectors(feature_df: Optional[pd.DataFrame]):
-    global shape_vector_store, feature_shape_vectors, project_loaded
+    global shape_vector_store, feature_shape_vectors, project_loaded, shape_record_store
     store_path = getattr(project_loaded, 'shape_store_path', None)
-    shape_vector_store = _load_shape_vector_store(store_path)
+    shape_record_store = _load_shape_record_store(store_path)
+    shape_vector_store = _load_shape_vector_store(store_path, shape_record_store)
     feature_shape_vectors = _build_feature_shape_vector_index(
         feature_df,
         shape_vector_store,
@@ -1487,7 +1551,7 @@ def display_hist_n_table(clickData, Significant = False):
         table_tab_content = html.Div([
                                 dbc.Table.from_dataframe(sd, striped=True, bordered=True, hover=True, size="sm"),
                                     ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
-        
+
         spectra_tab_content = html.Div([
                                     dcc.Graph(id='spectra-plot', style={"height": "400px"})
                                     ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
@@ -1495,7 +1559,29 @@ def display_hist_n_table(clickData, Significant = False):
         download_tab_content = html.Div([
                                     dbc.Table.from_dataframe(fg_info, striped=True, bordered=True, hover=True, size="sm", color="info"),
                                     ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
-        
+
+        chromatogram_tab_content = html.Div([
+                                    dcc.Loading(
+                                        id="chromatogram-loading-wrapper",
+                                        type="default",
+                                        children=[
+                                            html.Div(
+                                                dbc.Button(
+                                                    "Display the features chromatogram",
+                                                    id="load-chromatograms",
+                                                    color="primary",
+                                                ),
+                                                style={
+                                                    'display': 'flex',
+                                                    'justifyContent': 'center',
+                                                    'padding': '10px'
+                                                }
+                                            ),
+                                            html.Div(id="chromatogram-container"),
+                                        ],
+                                    )
+                                ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
+
         layout = html.Div([
                     html.Div([
                         html.H4(hist_title, style={'textAlign': 'left', 'paddingBottom': '10px'}),
@@ -1524,7 +1610,8 @@ def display_hist_n_table(clickData, Significant = False):
                                 dbc.Tabs(
                                     [   dbc.Tab(stat_tab_content, label=" Statistical analysis ", tab_id="tab-1"),
                                         dbc.Tab(table_tab_content, label=" Datatable ", tab_id="tab-2"),
-                                        dbc.Tab(download_tab_content, label=" Feature group informations ", tab_id="tab-4", id= 'fg-info-tab')
+                                        dbc.Tab(download_tab_content, label=" Feature group informations ", tab_id="tab-4", id= 'fg-info-tab'),
+                                        dbc.Tab(chromatogram_tab_content, label=" Chromatograms ", tab_id="tab-5"),
                                     ], active_tab="tab-1"
                                         ),
                                 dbc.Tooltip("Find all features from the feature group their potential neutral mass in Da, depending on the most abundant adduct from the ESI mode.",
@@ -1686,6 +1773,133 @@ def create_histogram_figure(Level):
     )
 
     return fig
+
+
+def _build_chromatogram_layout():
+    global sd_table, shape_record_store
+    if sd_table is None or len(sd_table) == 0:
+        return html.Div("No feature group is currently selected.")
+
+    if not shape_record_store:
+        return html.Div("Chromatogram files are unavailable for this project.")
+
+    if 'shape_id' not in sd_table.columns:
+        return html.Div("No chromatogram identifiers were found for the current selection.")
+
+    feature_shapes: Dict[str, List[dict]] = {}
+    feature_meta: Dict[str, dict] = {}
+
+    for _, row in sd_table.iterrows():
+        feature_id = str(row.get('feature'))
+        feature_meta.setdefault(
+            feature_id,
+            {
+                'rt': row.get('rt'),
+                'm/z': row.get('m/z'),
+            },
+        )
+        shape_id = row.get('shape_id')
+        if pd.isna(shape_id):
+            continue
+        record = shape_record_store.get(str(shape_id))
+        if not record:
+            continue
+        shape_payload = record.get('shape')
+        if (
+            not isinstance(shape_payload, (list, tuple))
+            or len(shape_payload) != 2
+            or len(shape_payload[0]) < 2
+        ):
+            continue
+        feature_shapes.setdefault(feature_id, []).append(
+            {
+                'sample': record.get('sample') or 'Unknown sample',
+                'ms_level': record.get('ms_level'),
+                'shape': shape_payload,
+            }
+        )
+
+    if not feature_shapes:
+        return html.Div("No chromatogram traces are available for the selected features.")
+
+    def _feature_title(fid: str) -> str:
+        meta = feature_meta.get(fid, {})
+        mz_val = meta.get('m/z')
+        rt_val = meta.get('rt')
+        mz_str = f"m/z {mz_val:.4f}" if pd.notna(mz_val) else "m/z N/A"
+        rt_str = f"rt {rt_val:.2f}s" if pd.notna(rt_val) else "rt N/A"
+        return f"Feature {fid} ({mz_str}, {rt_str})"
+
+    feature_order = sorted(
+        feature_shapes.keys(),
+        key=lambda fid: feature_meta.get(fid, {}).get('m/z') or 0,
+        reverse=True,
+    )
+
+    chart_cards = []
+    for fid in feature_order:
+        traces = feature_shapes[fid]
+        fig = go.Figure()
+        for trace in sorted(traces, key=lambda t: t['sample']):
+            rts, intensities = trace['shape']
+            fig.add_trace(
+                go.Scatter(
+                    x=rts,
+                    y=intensities,
+                    mode='lines',
+                    name=str(trace['sample']),
+                    hovertemplate='Sample: %{text}<br>RT: %{x}<br>Intensity: %{y}<extra></extra>',
+                    text=[trace['sample']] * len(rts),
+                )
+            )
+        fig.update_layout(
+            title=_feature_title(fid),
+            margin=dict(l=10, r=10, t=40, b=30),
+            height=280,
+            legend=dict(orientation='h', y=-0.25),
+            xaxis_title='Retention time',
+            yaxis_title='Intensity',
+        )
+        chart_cards.append(
+            html.Div(
+                dcc.Graph(figure=fig, config={'displayModeBar': False}),
+                style={'marginBottom': '12px'},
+            )
+        )
+
+    left_column = html.Div(
+        chart_cards[0::2],
+        style={
+            'width': '50%',
+            'maxHeight': '380px',
+            'overflowY': 'auto',
+            'paddingRight': '8px',
+        },
+    )
+    right_column = html.Div(
+        chart_cards[1::2],
+        style={
+            'width': '50%',
+            'maxHeight': '380px',
+            'overflowY': 'auto',
+            'paddingLeft': '8px',
+        },
+    )
+
+    return html.Div(
+        [left_column, right_column],
+        style={'display': 'flex', 'width': '100%'},
+    )
+
+@callback(
+    Output('chromatogram-container', 'children'),
+    Input('load-chromatograms', 'n_clicks'),
+    prevent_initial_call=True,
+)
+def _render_feature_chromatograms(n_clicks):
+    if not n_clicks:
+        raise PreventUpdate()
+    return _build_chromatogram_layout()
 
 
 # Filtering options of the Network graph
