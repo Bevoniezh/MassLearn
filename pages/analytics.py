@@ -1561,19 +1561,22 @@ def display_hist_n_table(clickData, Significant = False):
                                     ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
 
         chromatogram_tab_content = html.Div([
-                                    dcc.Store(id="chromatogram-loading-state", data="idle"),
-                                    html.Div(
-                                        dbc.Button(
-                                            "Display the features chromatogram",
-                                            id="load-chromatograms",
-                                            color="primary",
-                                            outline=False,
+                                    dcc.Loading(
+                                        id="chromatogram-button-loading",
+                                        type="default",
+                                        children=html.Div(
+                                            dbc.Button(
+                                                "Display the features chromatogram",
+                                                id="load-chromatograms",
+                                                color="primary",
+                                                outline=False,
+                                            ),
+                                            style={
+                                                'display': 'flex',
+                                                'justifyContent': 'center',
+                                                'padding': '10px'
+                                            }
                                         ),
-                                        style={
-                                            'display': 'flex',
-                                            'justifyContent': 'center',
-                                            'padding': '10px'
-                                        }
                                     ),
                                     dcc.Loading(
                                         id="chromatogram-loading-wrapper",
@@ -1892,38 +1895,25 @@ def _build_chromatogram_layout():
     )
 
 @callback(
-    Output('chromatogram-loading-state', 'data'),
+    Output('chromatogram-container', 'children'),
+    Output('load-chromatograms', 'children'),
+    Output('load-chromatograms', 'disabled'),
     Input('load-chromatograms', 'n_clicks'),
     prevent_initial_call=True,
 )
-def _start_chromatogram_loading(n_clicks):
+def _render_feature_chromatograms(n_clicks):
     if not n_clicks:
         raise PreventUpdate()
-    return "loading"
 
+    layout = _build_chromatogram_layout()
 
-@callback(
-    Output('chromatogram-container', 'children'),
-    Output('chromatogram-loading-state', 'data'),
-    Input('chromatogram-loading-state', 'data'),
-    prevent_initial_call=True,
-)
-def _render_feature_chromatograms(load_state):
-    if load_state != "loading":
-        raise PreventUpdate()
-    return _build_chromatogram_layout(), "ready"
+    button_child = dbc.Spinner(size="sm", color="light")
+    button_disabled = True
+    if layout:
+        button_child = "Display the features chromatogram"
+        button_disabled = False
 
-
-@callback(
-    Output('load-chromatograms', 'children'),
-    Output('load-chromatograms', 'disabled'),
-    Input('chromatogram-loading-state', 'data'),
-    prevent_initial_call=True,
-)
-def _toggle_chromatogram_button(load_state):
-    if load_state == "loading":
-        return dbc.Spinner(size="sm", color="light"), True
-    return "Display the features chromatogram", False
+    return layout, button_child, button_disabled
 
 
 # Filtering options of the Network graph
