@@ -1565,11 +1565,13 @@ def display_hist_n_table(clickData, Significant = False):
                                         id="chromatogram-loading-wrapper",
                                         type="default",
                                         children=[
+                                            dcc.Store(id="chromatogram-loading-state", data="idle"),
                                             html.Div(
                                                 dbc.Button(
                                                     "Display the features chromatogram",
                                                     id="load-chromatograms",
                                                     color="primary",
+                                                    outline=False,
                                                 ),
                                                 style={
                                                     'display': 'flex',
@@ -1608,10 +1610,10 @@ def display_hist_n_table(clickData, Significant = False):
                                 ], style={'display': 'inline-block', 'width': '35%', 'margin-left': '10px',  'margin-right': '10px'}),
                     html.Div([
                                 dbc.Tabs(
-                                    [   dbc.Tab(stat_tab_content, label=" Statistical analysis ", tab_id="tab-1"),
-                                        dbc.Tab(table_tab_content, label=" Datatable ", tab_id="tab-2"),
-                                        dbc.Tab(download_tab_content, label=" Feature group informations ", tab_id="tab-4", id= 'fg-info-tab'),
-                                        dbc.Tab(chromatogram_tab_content, label=" Chromatograms ", tab_id="tab-5"),
+                                    [   dbc.Tab(stat_tab_content, label="Statistical analysis", tab_id="tab-1"),
+                                        dbc.Tab(table_tab_content, label="Datatable", tab_id="tab-2"),
+                                        dbc.Tab(download_tab_content, label="Feature group informations", tab_id="tab-4", id= 'fg-info-tab'),
+                                        dbc.Tab(chromatogram_tab_content, label="Chromatograms", tab_id="tab-5"),
                                     ], active_tab="tab-1"
                                         ),
                                 dbc.Tooltip("Find all features from the feature group their potential neutral mass in Da, depending on the most abundant adduct from the ESI mode.",
@@ -1892,14 +1894,38 @@ def _build_chromatogram_layout():
     )
 
 @callback(
-    Output('chromatogram-container', 'children'),
+    Output('chromatogram-loading-state', 'data'),
     Input('load-chromatograms', 'n_clicks'),
     prevent_initial_call=True,
 )
-def _render_feature_chromatograms(n_clicks):
+def _start_chromatogram_loading(n_clicks):
     if not n_clicks:
         raise PreventUpdate()
-    return _build_chromatogram_layout()
+    return "loading"
+
+
+@callback(
+    Output('chromatogram-container', 'children'),
+    Output('chromatogram-loading-state', 'data'),
+    Input('chromatogram-loading-state', 'data'),
+    prevent_initial_call=True,
+)
+def _render_feature_chromatograms(load_state):
+    if load_state != "loading":
+        raise PreventUpdate()
+    return _build_chromatogram_layout(), "ready"
+
+
+@callback(
+    Output('load-chromatograms', 'children'),
+    Output('load-chromatograms', 'disabled'),
+    Input('chromatogram-loading-state', 'data'),
+    prevent_initial_call=True,
+)
+def _toggle_chromatogram_button(load_state):
+    if load_state == "loading":
+        return dbc.Spinner(size="sm", color="light"), True
+    return "Display the features chromatogram", False
 
 
 # Filtering options of the Network graph
