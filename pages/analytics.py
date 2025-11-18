@@ -1561,27 +1561,25 @@ def display_hist_n_table(clickData, Significant = False):
                                     ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
 
         chromatogram_tab_content = html.Div([
+                                    dcc.Store(id="chromatogram-loading-state", data="idle"),
+                                    html.Div(
+                                        dbc.Button(
+                                            "Display the features chromatogram",
+                                            id="load-chromatograms",
+                                            color="primary",
+                                            outline=False,
+                                        ),
+                                        style={
+                                            'display': 'flex',
+                                            'justifyContent': 'center',
+                                            'padding': '10px'
+                                        }
+                                    ),
                                     dcc.Loading(
                                         id="chromatogram-loading-wrapper",
                                         type="default",
-                                        children=[
-                                            dcc.Store(id="chromatogram-loading-state", data="idle"),
-                                            html.Div(
-                                                dbc.Button(
-                                                    "Display the features chromatogram",
-                                                    id="load-chromatograms",
-                                                    color="primary",
-                                                    outline=False,
-                                                ),
-                                                style={
-                                                    'display': 'flex',
-                                                    'justifyContent': 'center',
-                                                    'padding': '10px'
-                                                }
-                                            ),
-                                            html.Div(id="chromatogram-container"),
-                                        ],
-                                    )
+                                        children=html.Div(id="chromatogram-container"),
+                                    ),
                                 ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
 
         layout = html.Div([
