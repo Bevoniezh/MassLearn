@@ -3098,7 +3098,10 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
         Shape_threshold = 0.0
     else:
         Shape_threshold = max(0.0, min(1.0, Shape_threshold))
-    shape_refinement_enabled = Shape_threshold > 0 and bool(feature_shape_vectors)
+    # Shape vectors remain available for chromatogram visualization, but
+    # chromatographic similarity is no longer used to subdivide feature groups
+    # during analytics grouping.
+    shape_refinement_enabled = False
 
     if validity == False:
         raise PreventUpdate()
