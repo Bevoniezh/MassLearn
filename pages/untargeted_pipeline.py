@@ -1021,87 +1021,87 @@ project_part = html.Div([
                     
 # 3- Select raw dir or continue with mzml files
 ###############################################################################
-RAW_FILE_TYPES = {
-    'waters': {
-        'label': 'Waters (.raw folders)',
-        'placeholder': r"C:\\Users\\Arthur\\Waters_raw",
-        'hint': 'Waters .raw folders containing _FUNC001.DAT files',
-    },
-    'thermo': {
-        'label': 'Thermo (.raw files/folders)',
-        'placeholder': r"C:\\Users\\Arthur\\Thermo_raw",
-        'hint': 'Thermo .raw files or folders',
-    },
-    'bruker': {
-        'label': 'Bruker (.d folders)',
-        'placeholder': r"C:\\Users\\Arthur\\Bruker_d",
-        'hint': 'Bruker .d folders',
-    },
-    'sciex': {
-        'label': 'SCIEX (.wiff files)',
-        'placeholder': r"C:\\Users\\Arthur\\Sciex_wiff",
-        'hint': 'SCIEX .wiff files (with associated .scan files if applicable)',
-    },
-}
-DEFAULT_RAW_FILE_TYPE = 'waters'
+# RAW_FILE_TYPES = {
+#     'waters': {
+#         'label': 'Waters (.raw folders)',
+#         'placeholder': r"C:\\Users\\Arthur\\Waters_raw",
+#         'hint': 'Waters .raw folders containing _FUNC001.DAT files',
+#     },
+#     'thermo': {
+#         'label': 'Thermo (.raw files/folders)',
+#         'placeholder': r"C:\\Users\\Arthur\\Thermo_raw",
+#         'hint': 'Thermo .raw files or folders',
+#     },
+#     'bruker': {
+#         'label': 'Bruker (.d folders)',
+#         'placeholder': r"C:\\Users\\Arthur\\Bruker_d",
+#         'hint': 'Bruker .d folders',
+#     },
+#     'sciex': {
+#         'label': 'SCIEX (.wiff files)',
+#         'placeholder': r"C:\\Users\\Arthur\\Sciex_wiff",
+#         'hint': 'SCIEX .wiff files (with associated .scan files if applicable)',
+#     },
+# }
+# DEFAULT_RAW_FILE_TYPE = 'waters'
 
-@callback(
-    Output('raw-dir-input', 'placeholder'),
-    Output('raw-dir-guidance', 'children'),
-    Input('raw-file-type', 'value')
-)
-def update_raw_dir_guidance(file_type):
-    file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
-    info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
-    guidance = f"Expected: {info['hint']}." if info.get('hint') else ''
-    return info.get('placeholder', r"C:\\Users\\Arthur\\Raw-files"), guidance
+# @callback(
+#     Output('raw-dir-input', 'placeholder'),
+#     Output('raw-dir-guidance', 'children'),
+#     Input('raw-file-type', 'value')
+# )
+# def update_raw_dir_guidance(file_type):
+#     file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+#     info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
+#     guidance = f"Expected: {info['hint']}." if info.get('hint') else ''
+#     return info.get('placeholder', r"C:\\Users\\Arthur\\Raw-files"), guidance
 
-# Function to get all vendor files from a directory
-def get_raw_files(Directory, file_type = DEFAULT_RAW_FILE_TYPE):
-    rawfiles = []
-    file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
-    for root, dirs, files in os.walk(Directory):
-        if file_type in ['waters', 'thermo']:
-            for d in dirs:
-                if d.lower().endswith('.raw'):
-                    rawfiles.append(os.path.join(root, d))
-            if file_type == 'thermo':
-                for f in files:
-                    if f.lower().endswith('.raw'):
-                        rawfiles.append(os.path.join(root, f))
-        elif file_type == 'bruker':
-            for d in dirs:
-                if d.lower().endswith('.d'):
-                    rawfiles.append(os.path.join(root, d))
-        elif file_type == 'sciex':
-            for f in files:
-                if f.lower().endswith('.wiff') or f.lower().endswith('.wiff2'):
-                    rawfiles.append(os.path.join(root, f))
-    return rawfiles
+# # Function to get all vendor files from a directory
+# def get_raw_files(Directory, file_type = DEFAULT_RAW_FILE_TYPE):
+#     rawfiles = []
+#     file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+#     for root, dirs, files in os.walk(Directory):
+#         if file_type in ['waters', 'thermo']:
+#             for d in dirs:
+#                 if d.lower().endswith('.raw'):
+#                     rawfiles.append(os.path.join(root, d))
+#             if file_type == 'thermo':
+#                 for f in files:
+#                     if f.lower().endswith('.raw'):
+#                         rawfiles.append(os.path.join(root, f))
+#         elif file_type == 'bruker':
+#             for d in dirs:
+#                 if d.lower().endswith('.d'):
+#                     rawfiles.append(os.path.join(root, d))
+#         elif file_type == 'sciex':
+#             for f in files:
+#                 if f.lower().endswith('.wiff') or f.lower().endswith('.wiff2'):
+#                     rawfiles.append(os.path.join(root, f))
+#     return rawfiles
 
-# Function to check if there are vendor files in the folder
-def check_raw_contents(dir_path, file_type = DEFAULT_RAW_FILE_TYPE):
-    file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
-    try:
-        entries = os.listdir(dir_path)
-    except FileNotFoundError:
-        return False
-    if file_type == 'waters':
-        for entry in entries:
-            if entry.lower().endswith('.raw'):
-                full_path = os.path.join(dir_path, entry)
-                if os.path.isdir(full_path):
-                    for subentry in os.listdir(full_path):
-                        if subentry == '_FUNC001.DAT':
-                            return True
-        return False
-    elif file_type == 'thermo':
-        return any(entry.lower().endswith('.raw') for entry in entries)
-    elif file_type == 'bruker':
-        return any(entry.lower().endswith('.d') for entry in entries)
-    elif file_type == 'sciex':
-        return any(entry.lower().endswith('.wiff') or entry.lower().endswith('.wiff2') for entry in entries)
-    return False
+# # Function to check if there are vendor files in the folder
+# def check_raw_contents(dir_path, file_type = DEFAULT_RAW_FILE_TYPE):
+#     file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+#     try:
+#         entries = os.listdir(dir_path)
+#     except FileNotFoundError:
+#         return False
+#     if file_type == 'waters':
+#         for entry in entries:
+#             if entry.lower().endswith('.raw'):
+#                 full_path = os.path.join(dir_path, entry)
+#                 if os.path.isdir(full_path):
+#                     for subentry in os.listdir(full_path):
+#                         if subentry == '_FUNC001.DAT':
+#                             return True
+#         return False
+#     elif file_type == 'thermo':
+#         return any(entry.lower().endswith('.raw') for entry in entries)
+#     elif file_type == 'bruker':
+#         return any(entry.lower().endswith('.d') for entry in entries)
+#     elif file_type == 'sciex':
+#         return any(entry.lower().endswith('.wiff') or entry.lower().endswith('.wiff2') for entry in entries)
+#     return False
 
 @callback(
     [Output("mzml-progress", "value"),
@@ -1133,21 +1133,30 @@ def loading_buttom_mzml(n_clicks, n, state):
     
 mzml_alternative = None
 mzml_loading = 0
+# @callback(
+#     [Output('convert-raw', 'children'),
+#      Output("raw-dir-output", "children"),
+#      Output("raw-dir-input", "valid"),
+#      Output("raw-dir-input", "invalid"),
+#      Output("raw-dir-input", "disabled"),
+#      Output({'type': 'popup', 'index': 2}, 'children')
+#      ],
+#     [Input("raw-dir-input", "n_submit"),
+#      Input("mzml-alternative", "n_clicks")],
+#     [State("raw-dir-input", "value"),
+#      State('raw-file-type', 'value')],
+#     prevent_initial_call = True
+# )
+# def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
 @callback(
     [Output('convert-raw', 'children'),
      Output("raw-dir-output", "children"),
-     Output("raw-dir-input", "valid"),
-     Output("raw-dir-input", "invalid"),
-     Output("raw-dir-input", "disabled"),
      Output({'type': 'popup', 'index': 2}, 'children')
      ],
-    [Input("raw-dir-input", "n_submit"),
-     Input("mzml-alternative", "n_clicks")],
-    [State("raw-dir-input", "value"),
-     State('raw-file-type', 'value')],
+    Input("mzml-alternative", "n_clicks"),  
     prevent_initial_call = True
 )
-def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
+def validate_raw_input(n_clicks):
     global current_project, mzml_alternative, line_count, mzml_loading
     ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
@@ -1162,10 +1171,10 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
         )
         if len(current_project.mzml_files_path) == 0:
             mzml_loading = -1 # tag for error of files
-            return dash.no_update, "No files detected in the /mzML folder! Please copy your files before pushing the button.", None, None, True, 'y'
+            return dash.no_update, "No files detected in the /mzML folder! Please copy your files before pushing the button.", 'y'
         elif (len(current_project.mzml_files_path)<3):
             mzml_loading = 100
-            return dash.no_update, "MassLearn detect less than 3 files. You need at least one blank, one sample for treatment 1 and one sample for treamtment 2 to have any an analysis.", None, None, True, 'y'
+            return dash.no_update, "MassLearn detect less than 3 files. You need at least one blank, one sample for treatment 1 and one sample for treamtment 2 to have any an analysis.",'y'
 
         mzml_alternative = True
         current_project.sample_names = []
@@ -1176,63 +1185,95 @@ def validate_raw_input(n_submit, n_clicks, path_to_check, file_type):
         separating_line = create_separating_line(line_count)
         line_count += 1
         new_popup = html.Div(children = '', id={"type": "popup", "index": 4}, style={'display': 'none'})
-        return [separating_line, new_popup, noise_threshold], f"{len(current_project.mzml_files_path)} files detected.", None, None, True, 'y'
+        return [separating_line, new_popup, noise_threshold], f"{len(current_project.mzml_files_path)} files detected.", 'y'
 
-    if n_submit:
-        path_to_check = normalize_path(path_to_check)
-        file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
-        info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
-        # Add your validation logic here
-        if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
-            logging_config.log_info(logger, 'Raw files path: %s added.', path_to_check)
+    # if n_submit:
+    #     path_to_check = normalize_path(path_to_check)
+    #     file_type = (file_type or DEFAULT_RAW_FILE_TYPE).lower()
+    #     info = RAW_FILE_TYPES.get(file_type, RAW_FILE_TYPES[DEFAULT_RAW_FILE_TYPE])
+    #     # Add your validation logic here
+    #     if os.path.exists(path_to_check) and os.path.isdir(path_to_check) and check_raw_contents(path_to_check, file_type):
+    #         logging_config.log_info(logger, 'Raw files path: %s added.', path_to_check)
 
-            current_project.raw_folder_path = path_to_check
-            current_project.raw_file_type = file_type
-            current_project.raw_files_path = get_raw_files(path_to_check, file_type)
-            mzml_alternative = False
-            cache.set('project_loaded', current_project)
-            separating_line = create_separating_line(line_count)
-            line_count += 1
-            new_popup = html.Div(children = '', id={"type": "popup", "index": 3}, style={'display': 'none'})
-            return [separating_line, new_popup, convert_raw], "Path successfully loaded!", True, None, True, 'y'
-        else:
-            return "", f"Not a valid path! Make sure the folder exists, verify it is not a file, and confirm it contains at least one {info['hint']}.", None, True, False, 'n'
+    #         current_project.raw_folder_path = path_to_check
+    #         current_project.raw_file_type = file_type
+    #         current_project.raw_files_path = get_raw_files(path_to_check, file_type)
+    #         mzml_alternative = False
+    #         cache.set('project_loaded', current_project)
+    #         separating_line = create_separating_line(line_count)
+    #         line_count += 1
+    #         new_popup = html.Div(children = '', id={"type": "popup", "index": 3}, style={'display': 'none'})
+    #         return [separating_line, new_popup, convert_raw], "Path successfully loaded!", True, None, True, 'y'
+    #     else:
+    #         return "", f"Not a valid path! Make sure the folder exists, verify it is not a file, and confirm it contains at least one {info['hint']}.", None, True, False, 'n'
 
     raise PreventUpdate()
 
+
+# raw_dir_with_vendor_format = html.Div([
+#             html.Div([
+#                 html.H5('Are your files in vendor format or in .mzML format?', style={'textAlign': 'center'}),
+#                 html.Br(),
+#                 html.H6('(1) Select your vendor format, point to the folder containing the raw data, and press Enter', style={'textAlign': 'center'}),
+#                 dbc.ListGroupItem('WARNING! For Waters data, the conversion procedure removes "_FUNC003" related files (.raw) corresponding to lockspray references. We recommend converting a copy of your raw data rather than the originals.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
+#                 html.Br(),
+#                 dbc.RadioItems(
+#                     id='raw-file-type',
+#                     options=[{'label': value['label'], 'value': key} for key, value in RAW_FILE_TYPES.items()],
+#                     value=DEFAULT_RAW_FILE_TYPE,
+#                     inputClassName='me-2',
+#                     labelClassName='d-block',
+#                     className='mb-2',
+#                     style={'maxWidth': '600px'}
+#                 ),
+#                 html.Div(id='raw-dir-guidance', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
+#                 html.Br(),
+#                 dbc.Input(id="raw-dir-input", valid = None, placeholder=r"C:\Users\Arthur\Raw-files", type="text", style={'maxWidth': '600px'}),
+#                 html.Br(),
+#                 dcc.Interval(id='mzml-interval-component', interval=500, n_intervals=0, max_intervals=-1, disabled = True),  # Checks every second
+#                 html.Br(),
+#                 html.H5('... or ...', style={'textAlign': 'center'}),
+#                 html.Br(), 
+#                 html.H5('You files need to be in .mzML format.', style={'textAlign': 'center'}),
+#                 html.H6('Proteowizard can be used to convert vendor format to mzML. Please go on https://proteowizard.sourceforge.io/.', style={'textAlign': 'center'}),
+#                 html.H6('Then, copy your files to the /mzML folder which is present in the project folder. Then click on "Verify my .mzML files" button.', style={'textAlign': 'center'}),
+#                 html.Br(),
+#                 dbc.Button('My files are in the /mzML folder', id = "mzml-alternative", color="primary", n_clicks=0, style={"width": "300px"}),
+#                 dbc.Progress(id="mzml-progress", color="success", style={'display':'none'}, className='mt-1'),
+#                 html.Br(),
+                
+#                 dbc.Tooltip(
+#                     "MassLearn verifies that the selected folder contains at least one file matching the chosen vendor format.",
+#                     target="raw-dir-input",  # ID of the component to which the tooltip is attached
+#                     placement="left"),
+#                 html.P(children = '\n', id="raw-dir-output"),
+                         
+#                 dbc.Tooltip(
+#                     "MassLearn verifies /mzML folder contains files.",
+#                     target="raw-dir-input", 
+#                     placement="left"),
+#                 html.Br(),
+#                 ], style={
+#                         'display': 'flex',
+#                         'flexDirection': 'column',
+#                         'alignItems': 'center',      # Center horizontally in the flex container
+#                     }),
+#             html.Div(id = 'convert-raw', children = '')
+#                 ])
+
 raw_dir = html.Div([
-            html.Div([
-                html.H5('Are your files in vendor format or in .mzML format?', style={'textAlign': 'center'}),
+            html.Div([                
+                html.H5('You files need to be in .mzML format.', style={'textAlign': 'center'}),
+                html.H6('If you have a vendor format (.RAW, .d, .wiff, ...), Proteowizard can be used to convert vendor format to mzML.', style={'textAlign': 'center'} ),
+                html.H6('Please go on https://proteowizard.sourceforge.io/.', style={'textAlign': 'center'}),
+                html.H6('Then, copy your files to the /mzML folder which is present in the project folder. Then click on "Verify my .mzML files" button.', style={'textAlign': 'center'}),
                 html.Br(),
-                html.H6('(1) Select your vendor format, point to the folder containing the raw data, and press Enter', style={'textAlign': 'center'}),
-                dbc.ListGroupItem('WARNING! For Waters data, the conversion procedure removes "_FUNC003" related files (.raw) corresponding to lockspray references. We recommend converting a copy of your raw data rather than the originals.', color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
-                html.Br(),
-                dbc.RadioItems(
-                    id='raw-file-type',
-                    options=[{'label': value['label'], 'value': key} for key, value in RAW_FILE_TYPES.items()],
-                    value=DEFAULT_RAW_FILE_TYPE,
-                    inputClassName='me-2',
-                    labelClassName='d-block',
-                    className='mb-2',
-                    style={'maxWidth': '600px'}
-                ),
-                html.Div(id='raw-dir-guidance', className='text-muted', style={'fontSize': '12px', 'maxWidth': '600px', 'textAlign': 'center'}),
-                html.Br(),
-                dbc.Input(id="raw-dir-input", valid = None, placeholder=r"C:\Users\Arthur\Raw-files", type="text", style={'maxWidth': '600px'}),
-                html.Br(),
-                dcc.Interval(id='mzml-interval-component', interval=500, n_intervals=0, max_intervals=-1, disabled = True),  # Checks every second
-                html.Br(),
-                html.H5('... or ...', style={'textAlign': 'center'}),
-                html.Br(),
-                html.H6('(2) Your files are already in .MZML format .', style={'textAlign': 'center'}),
-                html.H6('Copy them to /mzML folder which is present in your project folder. Then click on "Verify my .mzML files" button.', style={'textAlign': 'center'}),
-                html.Br(),
-                dbc.Button('Verify my .mzML files', id = "mzml-alternative", color="primary", n_clicks=0, style={"width": "300px"}),
+                dbc.Button('My files are in the /mzML folder', id = "mzml-alternative", color="primary", n_clicks=0, style={"width": "300px"}),
                 dbc.Progress(id="mzml-progress", color="success", style={'display':'none'}, className='mt-1'),
-                html.Br(),
+                html.Br(),     
                 dbc.Tooltip(
-                    "MassLearn verifies that the selected folder contains at least one file matching the chosen vendor format.",
-                    target="raw-dir-input",  # ID of the component to which the tooltip is attached
+                    "MassLearn verifies /mzML folder contains files.",
+                    target="mzml-alternative",
                     placement="left"),
                 html.P(children = '\n', id="raw-dir-output"),
                 html.Br(),
@@ -1242,8 +1283,7 @@ raw_dir = html.Div([
                         'alignItems': 'center',      # Center horizontally in the flex container
                     }),
             html.Div(id = 'convert-raw', children = '')
-                ])
-                    
+                ])                   
                     
 # 4- Convert raw files in mzML          
 ###############################################################################
@@ -1403,12 +1443,9 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         line_count += 1
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
         skip_notice = html.Div(
-            dbc.Alert(
-                "Noise trace removal has been skipped. The pipeline will continue with the existing spectra.",
-                color="warning",
-                className="mb-3",
-            ),
-            style={"width": "500px"}   # or "50%", "30rem", etc.
+            html.H6(
+                "Noise trace removal has been skipped. The pipeline will continue with the existing spectra.", style={'textAlign': 'center'}
+                )
         )
         return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
 
@@ -1427,16 +1464,14 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
 
 noise_threshold = html.Div([ 
                     html.Div([        
-                        dbc.ListGroupItem("""We need to remove noise traces. To remove it, we basically remove the masses which appear to be present \
-            along a minimum percentage of the elution time. E.g, if a mass is present in at least 20% \
-            of the scans, it is highly possible it is a noise trace. In normal situation, it will be lower. By default, when the total \
-            elution time kept in your study design is 5-6 min from the beggining to the end, we consider 20% as a satisfying threshold to detect noise. \
-            If your elution time range is thinner, you should increase the percentage because \
-            the elution time taken by a significant feature is relatively higher compared to what \
-            we found in a wider elution time range, vice versa. \
-            Also, all mass with a > x.8 decimal value are deleted because expected to be non-natural\
-            \n!!! Be careful, the lower your noise trace detection threshold, the longer it will be to process it !!!\
-                    """, color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
+                        dbc.ListGroupItem(
+    """Noise traces are removed by filtering masses that appear in too many scans.\
+    If a mass is present in ≥20% of the elution time (typical when your usable window is ~5–6 min),\
+    it is likely noise rather than a true feature. For shorter elution windows, increase this percentage;\
+    for longer windows, decrease it.\
+    Masses ending in > x.8 Da are also discarded as non-natural (e.g 101.850 Da).\
+    \n!!! Lower thresholds increase processing time !!!""", 
+    color="warning", style={'maxWidth': '700px', 'fontSize': '14px', 'padding-left': '5px','padding-right': '5px',}),
                         html.Br(),
                         html.H1(''),
                         html.H5('Enter the Noise trace threshold and click on "Confirm noise trace"', style={'textAlign': 'center'}),                        
@@ -1578,13 +1613,8 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
 
     if skip_thresholds:
         notice = html.Div(
-            dbc.Alert(
-                "Noise thresholds were skipped. Processing will continue without applying MS1/MS2 noise filters.",
-                color="warning",
-                className="mb-3",
-            ),
-            style={"width": "500px"}   # or "50%", "30rem", etc.
-        )
+            html.H6(
+                "Noise thresholds were skipped. Processing will continue without applying MS1/MS2 noise filters.", style={'textAlign': 'center'}))
         return [separating_line, new_popup, notice, progress], True, True, 'y'
 
     return [separating_line, new_popup, progress], True, True, 'y'
@@ -1593,7 +1623,7 @@ ms_noise = html.Div([
                     dbc.ListGroupItem("""For convenience, all masses with an intensity (or count) lower than 400 for MS1 and 200 for MS2 will be removed by default. \
         Thoses masses represent the background noise, which is different from the noises traces. \
         We HIGHLY recommend to remove those low m/z counts, otherwise further steps will take a lot of time.\
-                """, color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
+                """, color="warning", style={'maxWidth': '700px', 'fontSize': '14px', 'padding-left': '5px','padding-right': '5px',}),
                     html.Br(),
                     html.H1(''),
                     html.H5('Enter the Noise threshold and click on "Begin processing"', style={'textAlign': 'center'}),
@@ -1652,7 +1682,6 @@ ms_noise = html.Div([
                         'flexDirection': 'column',
                         'alignItems': 'center',      # Center horizontally in the flex container
                     }),
-                    
                     html.Div(id = 'conversion-progress-part')
                 ])
                         
@@ -1884,11 +1913,7 @@ def update_conversion_progress(n):
                 [
                     html.H5(error_info, style={'textAlign': 'center'}),
                     html.Br(),
-                    html.P(
-                        "Please review the log file (log.log) to understand the error details, then adjust your configuration "
-                        "and run the pipeline again.",
-                        style={'textAlign': 'center','maxWidth': '690px'}
-                    ),
+                    html.H6("Please review the log file (MassLearn/log.log) to understand the error details, then adjust your configuration and run the pipeline again.", style={'textAlign': 'center'} ),
                     html.Div(
                         dbc.Button(
                             "Open log file",
@@ -1900,12 +1925,9 @@ def update_conversion_progress(n):
                         style={'display': 'flex', 'justifyContent': 'center'}
                     ),
                     html.Br(),
-                    html.Div(
-                        html.Small(
-                            "Once you have reviewed the log details, please retry the pipeline.",
-                            style={'display': 'block', 'textAlign': 'center','maxWidth': '690px'}
-                        )
-                    ),
+                    html.H6("Once you have reviewed the log details, please retry the pipeline.", style={'textAlign': 'center'} ),
+                    html.Br(),
+                    html.Br(),
                     html.Div(id='log-open-feedback')
                 ]
             )
@@ -1949,23 +1971,19 @@ def open_log_file(n_clicks):
             logging_config.configure_logging()
         _open_path_with_default_app(log_path.resolve())
         logging_config.log_info(logger, 'Log file opened from error prompt.')
-        return dbc.Alert(
+        return html.Div(
             [
-                html.Span('Opening the session log. If it does not appear automatically, you can find it here: '),
-                html.Code(str(log_path.resolve()))
-            ],
-            color='info',
-            dismissable=True
+                html.H6('Opening the session log. If it does not appear automatically, you can find it here: ', style={'textAlign': 'center'} ),
+                html.H6(str(log_path.resolve()), style={'textAlign': 'center'} )
+            ]
         )
     except Exception as exc:
         logging_config.log_exception(logger, 'Unable to open the session log automatically.', exception=exc)
-        return dbc.Alert(
+        return html.Div(
             [
-                html.Span('Unable to open the session log automatically. Please open it manually at: '),
-                html.Code(str(log_path.resolve()))
+                html.H6('Unable to open the session log automatically. Please open it manually at: ', style={'textAlign': 'center'} ),
+                html.H6(str(log_path.resolve()), style={'textAlign': 'center'} )
             ],
-            color='danger',
-            dismissable=True
         )
 
 

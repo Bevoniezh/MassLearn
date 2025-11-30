@@ -34,9 +34,7 @@ config = configparser.ConfigParser()
 
 if not CONFIG_FILE.exists():
     config["Software"] = {
-        "SeeMS": "",
         "MZmine": "",
-        "ProteoWizard": ""
     }
     config["General"] = {
         "last_user": ""
@@ -132,9 +130,7 @@ def check_software():
     confirmation = True
 
     for key, label in [
-        ("SeeMS", "seems"),
         ("MZmine", "mzmine"),
-        ("ProteoWizard", "msconvert")
     ]:
         raw_path = config.get("Software", key, fallback="").strip()
 
@@ -188,32 +184,48 @@ text_input = html.Div([
     'alignItems': 'center',
 })
 
+# software_deprecated = html.Div([
+#     html.H5('Powered by', style={'textAlign': 'center'}),
+#     html.Div([
+#         html.Button(
+#             children=[html.Img(src='/assets/seems.png', style={'height': '50px'})],
+#             id='seems-button',
+#             style={'background': 'none', 'border': 'none', 'padding': '0'},
+#             n_clicks=0
+#         ),
+#         dbc.Tooltip(check_software()[0][0], target="seems-button", placement="left"),
+
+#         html.Button(
+#             children=[html.Img(src='/assets/mzmine_logo.png', style={'height': '50px'})],
+#             id='mzmine-button',
+#             style={'background': 'none', 'border': 'none', 'padding': '0'},
+#             n_clicks=0
+#         ),
+#         dbc.Tooltip(check_software()[0][1], target="mzmine-button", placement="left"),
+
+#         html.Button(
+#             children=[html.Img(src='/assets/proteowizard.jpg', style={'height': '50px'})],
+#             id='msconvert-button',
+#             style={'background': 'none', 'border': 'none', 'padding': '0'},
+#             n_clicks=0
+#         ),
+#         dbc.Tooltip(check_software()[0][2], target="msconvert-button", placement="left"),
+#     ], style={'display': 'flex', 'justify-content': 'space-around', 'width': '100%'}),
+#     html.Br(),
+# ])
+
+
 software = html.Div([
     html.H5('Powered by', style={'textAlign': 'center'}),
     html.Div([
-        html.Button(
-            children=[html.Img(src='/assets/seems.png', style={'height': '50px'})],
-            id='seems-button',
-            style={'background': 'none', 'border': 'none', 'padding': '0'},
-            n_clicks=0
-        ),
-        dbc.Tooltip(check_software()[0][0], target="seems-button", placement="left"),
-
         html.Button(
             children=[html.Img(src='/assets/mzmine_logo.png', style={'height': '50px'})],
             id='mzmine-button',
             style={'background': 'none', 'border': 'none', 'padding': '0'},
             n_clicks=0
         ),
-        dbc.Tooltip(check_software()[0][1], target="mzmine-button", placement="left"),
+        dbc.Tooltip(check_software()[0][0], target="mzmine-button", placement="left"),
 
-        html.Button(
-            children=[html.Img(src='/assets/proteowizard.jpg', style={'height': '50px'})],
-            id='msconvert-button',
-            style={'background': 'none', 'border': 'none', 'padding': '0'},
-            n_clicks=0
-        ),
-        dbc.Tooltip(check_software()[0][2], target="msconvert-button", placement="left"),
     ], style={'display': 'flex', 'justify-content': 'space-around', 'width': '100%'}),
     html.Br(),
 ])
@@ -261,25 +273,17 @@ layout = html.Div([
 
 @callback(
     Output("input-div", "children"),
-    [Input("seems-button", "n_clicks"),
-     Input("mzmine-button", "n_clicks"),
-     Input("msconvert-button", "n_clicks")]
+    [Input("mzmine-button", "n_clicks")]
 )
-def open_input_software(n_clicks_seems, n_clicks_mzmine, n_clicks_msconvert):
+def open_input_software(n_clicks_mzmine):
     ctx = dash.callback_context
     if not ctx.triggered:
         return ['']
 
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    if button_id == "seems-button":
-        cache.set('software_path', "SeeMS")
-        label = "seems.exe"
-    elif button_id == "mzmine-button":
+    if button_id == "mzmine-button":
         cache.set('software_path', "MZmine")
         label = "MZmine.exe"
-    elif button_id == "msconvert-button":
-        cache.set('software_path', "ProteoWizard")
-        label = "msconvert.exe"
     else:
         return ['']
 
@@ -317,9 +321,7 @@ def shutdown_app(n):
 
 
 @callback(
-    [Output("seems-button", "n_clicks"),
-     Output("mzmine-button", "n_clicks"),
-     Output("msconvert-button", "n_clicks")],
+    [Output("mzmine-button", "n_clicks")],
     Input("confirm-button", "n_clicks"),
     State("input-software", "value"),
     prevent_initial_call=True
@@ -328,7 +330,7 @@ def software_output(confirm, input_soft):
     if confirm and input_soft:
         soft = cache.get("software_path")
         update_config("Software", soft, input_soft)
-    return 0, 0, 0
+    return 0
 
 @callback(
     [Output("validation-output", "children"),

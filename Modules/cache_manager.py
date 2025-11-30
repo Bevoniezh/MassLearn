@@ -46,11 +46,13 @@ class Software_DashApp():
     Legacy code that indexes :attr:`path` directly continues to work.
     """
 
-    SOFTWARE_ENTRIES = [
-        ("SeeMS", "seems.exe"),
-        ("MZmine", "MZmine.exe"),
-        ("ProteoWizard", "msconvert.exe"),
-    ]
+    #SOFTWARE_ENTRIES = [
+    #    ("SeeMS", "seems.exe"),
+    #    ("MZmine", "MZmine.exe"),
+    #    ("ProteoWizard", "msconvert.exe"),
+    #]
+
+    SOFTWARE_ENTRIES = [("MZmine", "MZmine.exe")]
 
     def __init__(self, config_path=None):
         self.path = {}
@@ -89,11 +91,11 @@ class Software_DashApp():
         return True
 
     def _load_from_legacy_file(self):
-        msconvert = ['ProteoWizard', 'msconvert.exe']
+        #msconvert = ['ProteoWizard', 'msconvert.exe']
         mzmine = ['MZmine', 'MZmine.exe']
-        seems = ['SeeMS', 'seems.exe']
+        #seems = ['SeeMS', 'seems.exe']
         legacy_path = Path('./data/software_path_dash.dat')
-
+        soft_list = [mzmine]
         for software, _ in self.SOFTWARE_ENTRIES:
             self.path.setdefault(software, '')
 
@@ -102,7 +104,7 @@ class Software_DashApp():
 
         with legacy_path.open('r+') as f:
             file = f.readlines()
-            for software, line in zip([seems, mzmine, msconvert], file):
+            for software, line in zip(soft_list, file):
                 if software[1] not in line:
                     text = f'Need to search for path of {software[1]}, please wait.'
                     text = cli.DisplayText(text)
