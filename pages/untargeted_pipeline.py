@@ -1884,14 +1884,13 @@ def update_conversion_progress(n):
         title_status = f"Estimated time remaining: {minutes_remaining} min {seconds_remaining} sec"
     else:
         title_status = "Calculating time remaining..."
-    
     if progress < 100:
         return "", progress, f"{progress}%" if progress > 0 else "", None, title_status, False
     else:
         if failure == []:
-            cache.set('project_loaded', current_project)
-            thread_project = threading.Thread(target=save_project)
-            thread_project.start()
+            #cache.set('project_loaded', current_project)
+            #thread_project = threading.Thread(target=save_project)
+            #thread_project.start()
             separating_line = create_separating_line(line_count)
             line_count += 1
             if mzml_alternative:
@@ -2035,7 +2034,7 @@ def add_template(template_path):
     columns_to_check = [col for col in template.columns if col[:10] == 'Treatment_']
     for c in columns_to_check:
         all_values_nothing = (template[c] == 'NOTHING').all()
-        if not all_values_nothing and c in ['Treatment_1', 'Treatment_2', 'Treatment_3', 'Treatment4', 'Treatment_5', 'Treatment_6', 'Chem_treatment_1', 'Chem_treatment_2', 'Chem_treatment_3']:
+        if not all_values_nothing and c in ['Treatment_1', 'Treatment_2', 'Treatment_3', 'Treatment4', 'Treatment_5', 'Treatment_6']:
             return False, f'In {os.path.basename(template_path)} a treatment col with treament values lacks a name. Use Treatment_yourclassname as column title for a class name.'
         
     columns_to_check += ['Technician', 'Investigator', 'Preparation_date', 'Line', 'Experiment_title']
@@ -2048,8 +2047,6 @@ def add_template(template_path):
                 samples = template_without_blank.loc[template_without_blank[c] == label, 'Samples'].to_list()
                 if 'Treatment_' in c:
                     class_value = c.split('Treatment_')[1]
-                elif 'Chem_treatment_' in c:
-                    class_value = c.split('Chem_treatment_')[1]
                 else:
                     class_value = c
                 new_table = {
@@ -2359,12 +2356,10 @@ def manage_batch(template_n_click, batch_n_clicks, n_clicks_mzmine, n_clicks_con
     
 mzmine_settings = html.Div([
                     html.Div([
-                        dbc.ListGroupItem("""For the next step, we will call an open source software called MZmine. This software is a 100% tunable device to filter the mass spectra and generate a feature list. \
-            A feature is a signal, which can be a compound ion or noise, detected by the mass spectrometer and which have a shape recognized by the software depending on the defined settings. As we said, feature is not necessarly a compound, it can be instrument noise, it can be a chemical contaminant, it can be anything detected. \
-            The feature list are all the relevant signals computationally dectected by MZmine and which could potentially be an existing compound. Depending on the LC properties, a feature from an existing compound look like a gaussian curve. Each feature has properties like a retention time and a m/z, and is found present or not in your samples. \
-            Now, we need to generate batch files, in .xml format. A batch file is a file containing instructions for MZmine to generate a feature list. It contains all the parameters defined by default to identify the features.
-                
-            The advantage of MZmine is that hundreds of parameters can be defined to generate the feature list.""", color="warning", style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px','padding-right': '5px',}),
+                        dbc.ListGroupItem("""For this step, we use MZmine, an open-source LC-MS processing tool (see the documentation: https://mzmine.github.io/mzmine_documentation).\
+                            MZmine detects features, i.e., any signal with a chromatographic shape — true compounds, contaminants, or instrument noise. Each feature is defined by properties like retention time and m/z.\
+                            We then generate batch files (.xml) that specify all parameters used for feature detection. These files allow fully reproducible processing. MZmine offers extensive tunability, with hundreds of adjustable parameters.""", 
+                            color="warning", style={'maxWidth': '600px', 'fontSize': '14px', 'padding-left': '5px','padding-right': '5px',}),
                         
                         html.Br(), 
                         dbc.Alert([
@@ -2434,17 +2429,10 @@ mzmine_settings = html.Div([
                             target="meta-analysis",  # ID of the component to which the tooltip is attached
                             placement="top"),
                         html.Br(),
-                        dbc.Alert(
-                            [
-                                html.P(
-                                    "Before launching MZmine, make sure the application is running and that a valid account is signed in. "
-                                    "If no account is logged in, MZmine will not generate the feature list.",
-                                    style={'margin-bottom': '0px'}
-                                )
-                            ],
-                            color="warning",
-                            style={'maxWidth': '600px', 'fontSize': '12px', 'padding-left': '5px', 'padding-right': '5px'}
-                        ),
+                        html.H6(
+                            "Before launching MZmine, make sure the application is running and that a valid account is signed in. "
+                            "If no account is logged in, MZmine will not generate the feature list!",
+                            style={'textAlign': 'center'}),
                         html.Br(),
                         dbc.Button('Launch MZmine', id='mzmine', color="primary", n_clicks=0, disabled = True),
                         dbc.Tooltip(

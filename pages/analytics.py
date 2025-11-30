@@ -1165,12 +1165,6 @@ main_layout =  html.Div([
                                        type="number", value=0.9, step=0.01, min=0, max=1)],
                             size="sm"
                                 ),
-                        dbc.InputGroup(
-                            [dbc.InputGroupText("Shape Corr.", id='shape-input'),
-                             dbc.Input(id='shape-threshold',
-                                       type="number", value=0.7, step=0.01, min=0, max=1)],
-                            size="sm"
-                                ),
                         dbc.Tooltip(
                             "RT threshold to create a FG or a MFG.", #  It need to have at least 50% of same samples with values != 0 in both features to be valid. I.e you have 10 samples in total, in f1 if there is 10 samples with values != 0, and in f2 at least 5 samples with values !=0, the correlation is calculated.
                             target="rt-threshold",  # ID of the component to which the tooltip is attached
@@ -1179,10 +1173,6 @@ main_layout =  html.Div([
                             "NORMAL MODE: Spearman correlation accross samples for each pair of feature. META MODE: m/z threshold between two potential neutral mass.", #  It need to have at least 50% of same samples with values != 0 in both features to be valid. I.e you have 10 samples in total, in f1 if there is 10 samples with values != 0, and in f2 at least 5 samples with values !=0, the correlation is calculated.
                             target="spearman-input",  # ID of the component to which the tooltip is attached
                             placement="top"),
-                        dbc.Tooltip(
-                            "Minimum chromatographic-shape similarity used to subdivide feature groups after the network step. Set to 0 to skip the shape refinement stage.",
-                            target="shape-input",
-                            placement="top")], style={'display': 'flex','margin-bottom': '10px'}),
                     html.Div([
                         dbc.Container([
                             dbc.ButtonGroup([
