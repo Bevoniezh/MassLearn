@@ -1186,9 +1186,13 @@ main_layout =  html.Div([
                                 ],
                                     style={'text-align': 'center'},  # Center-align the content inside the container
                                     fluid=True, className="d-flex flex-column justify-content-between"),
-                        dbc.Container([                            
+                        dbc.Tooltip(
+                            "Display the variance explained per feature to help identify discriminatory groups across treatments.",
+                            target="variation-button",  # ID of the component to which the tooltip is attached
+                            placement="top"),
+                        dbc.Container([
                             dbc.InputGroup(
-                                [dbc.InputGroupText("Sample threshold"), 
+                                [dbc.InputGroupText("Sample threshold"),
                                  dbc.Input(id='sample-threshold', type="number", value=100, step=1, min=0, max=100),
                                  dbc.InputGroupText("%")]
                                     ),
@@ -1620,11 +1624,8 @@ def display_hist_n_table(clickData, Significant = False):
 def display_variance_info():
     global stand_ion_df, ion_df, project_loaded
     variance_df, variance_df_str, levels_coef_determination_dict = make_variance_df(stand_ion_df)
-       
-    var = html.Div([dbc.Table.from_dataframe(variance_df_str, striped=True, bordered=True, hover=True, size="sm"),
-                                ], style={ 'margin-right': '10px', 'maxHeight': '400px', 'overflow': 'auto', 'margin-top': '10px'})
 
-    var = dash_table.DataTable(
+    var_table = dash_table.DataTable(
         data=variance_df_str.to_dict('records'),  # Convert DataFrame to dictionary
         columns=[{'name': i, 'id': i} for i in variance_df_str.columns],
         sort_action="native",
@@ -1657,7 +1658,24 @@ def display_variance_info():
             'if': {'row_index': 'odd'},
             'backgroundColor': 'rgb(245, 245, 245)' }]
                         ),
-    return var
+    description = html.Div([
+        html.P(
+            "The variation table summarizes how much each treatment level explains the standardized intensity of every feature (R² values).",
+            style={'marginBottom': '4px'}),
+        html.P(
+            "Higher percentages highlight feature groups that discriminate best between conditions; use the row selector to inspect specific features.",
+            style={'marginBottom': '8px'}),
+    ])
+
+    return html.Div(
+        [description, var_table],
+        style={
+            'margin-right': '10px',
+            'maxHeight': '420px',
+            'overflow': 'auto',
+            'margin-top': '10px',
+        },
+    )
 
     
 # Callback to update the hist once the dynamic content is clicked
@@ -3070,10 +3088,9 @@ def _refine_component_by_shape(component_nodes, threshold, graph):
      Input('update-intensities', 'n_clicks')],
     State('rt-threshold', 'value'),
     State('correlation-threshold', 'value'), # it is also mz threshold in meta analysis
-    State('shape-threshold', 'value'),
     prevent_initial_call = True
 )
-def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_threshold, Correlation_threshold, Shape_threshold):
+def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_threshold, Correlation_threshold):
     global preprocessed_df, stand_preprocessed_df, preprocessed_df_raw
     global G, S, network_updated, updating, FG_pair_shared_features
     global stand_ion_df, ion_df, ion_df_raw
@@ -3084,10 +3101,6 @@ def update_graph(n_clicks, intermediate_signal, update_intensities_clicks, Rt_th
     ctx = dash.callback_context
     button_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
-    if Shape_threshold is None:
-        Shape_threshold = 0.0
-    else:
-        Shape_threshold = max(0.0, min(1.0, Shape_threshold))
     # Shape vectors remain available for chromatogram visualization, but
     # chromatographic similarity is no longer used to subdivide feature groups
     # during analytics grouping.
