@@ -2723,8 +2723,20 @@ def _group_size_counts(graph):
 # For meta analysis, we make a feature grouping per tempalte, then inter tempaltes
 def feature_grouping(Msn_deblanked, Rt_threshold, Correlation_threshold):
     global current_project, deblanking_featuregroup_info
-    minimum_ratio_threshold = 1 - (5/len(current_project.sample_names)) # 0.5 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more sampels in an experiment, the higher this threshold to avoid chained wrong corrrelation 
-    
+    minimum_ratio_threshold = 1 - (5/len(current_project.sample_names)) # 0.5 for 10 samples, it is nb of column (samples) with non-0 values at least to be shared between two features to validate a correlation. The more sampels in an experiment, the higher this threshold to avoid chained wrong corrrelation
+
+    project_context = current_project if getattr(current_project, "update_log", None) else None
+    project_name = getattr(current_project, "name", "unknown")
+    logging_config.log_info(
+        logger,
+        "Starting statistical feature grouping for project %s (rt threshold %s, correlation threshold %s, minimum shared-signal ratio %.2f).",
+        project_name,
+        Rt_threshold,
+        Correlation_threshold,
+        minimum_ratio_threshold,
+        project=project_context,
+    )
+
     feature_id = 1 # a unique id number is given to all features from all experiments
     ID = 1 # correspond to group node (feature group) IDs
     experiments = {} # keys: sample temaltes, values: a dict with key FG: {'identifier': ID, 'subset' : stand_subset_df, 'avg_row': stand_avg_row}, key ion_df: stand_ion_df for the whole template
@@ -2942,6 +2954,16 @@ def feature_grouping(Msn_deblanked, Rt_threshold, Correlation_threshold):
     current_project.experiments = experiments
     current_project.experiment_FG = experiment_FG
 
+    logging_config.log_info(
+        logger,
+        "Feature grouping identified %d groups using rt threshold %s, correlation threshold %s, and minimum shared-signal ratio %.2f.",
+        len(experiment_FG),
+        Rt_threshold,
+        Correlation_threshold,
+        minimum_ratio_threshold,
+        project=project_context,
+    )
+
 deblanking_featuregroup_info = '' # global variable to display remove blank signal information
 @callback(
     [Output('return-main-part', 'children'),
@@ -3003,6 +3025,15 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
             project_name,
             project=project_context,
         )
+    unique_features = msn_df['feature'].nunique() if not msn_df.empty else 0
+    unique_samples = msn_df['sample'].nunique() if not msn_df.empty else 0
+    logging_config.log_info(
+        logger,
+        "MZmine processed table contains %d unique features across %d samples.",
+        unique_features,
+        unique_samples,
+        project=project_context,
+    )
     current_project.msn_df = msn_df
     msn_df_path = os.path.join(current_project.featurepath, current_project.name + '_msn.csv')
     current_project.msn_df_path = msn_df_path
@@ -3094,6 +3125,17 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     current_project.complete = True
     cache.set('project_loaded', current_project)
     current_project.save()
+
+    deblanked_features = msn_df_deblanked['feature'].nunique() if not msn_df_deblanked.empty else 0
+    deblanked_samples = msn_df_deblanked['sample'].nunique() if not msn_df_deblanked.empty else 0
+    logging_config.log_info(
+        logger,
+        "Deblanked feature list contains %d unique features across %d samples (blank ratio 1/%s).",
+        deblanked_features,
+        deblanked_samples,
+        Level,
+        project=project_context,
+    )
 
     logging_config.log_info(
         logger,
