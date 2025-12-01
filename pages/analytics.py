@@ -3828,12 +3828,11 @@ def process_component(component, graph, experiment_index, all_pairs):
      Output("volcano-table-progress", "label"),
      Output('volcano-table-progress-div', 'style'),
      Output('volcano-table-div', 'style')],
-    [Input('update-button', 'n_clicks'),
-     Input('network-interval', 'n_intervals')],
+    Input('network-interval', 'n_intervals'),
     State('sample-threshold', 'value'),
     prevent_initial_call = True
 )
-def statistical_run(n_clicks, n, sample_threshold):
+def statistical_run(n, sample_threshold):
     global fg_table, fg_table_render, stat_proces_thread, network_updated, updating, loading_progress, pres_sample_threshold
     pres_sample_threshold = sample_threshold
     if network_updated and stat_proces_thread == None:
