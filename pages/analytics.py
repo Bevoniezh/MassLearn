@@ -1131,7 +1131,7 @@ fg_table_content =    dbc.Card(
 
 
 # Below is the main layout, which include the tabs        
-main_layout =  html.Div([
+main_layout_deprecated =  html.Div([
                     html.Div(navbar, style={'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'zIndex': 1000}),
                     html.Div([dbc.Button("Display analytical dashboard", id='first-update-button', n_clicks=0, color="primary"),
                               html.Div(id='info-update-button'),
@@ -1206,6 +1206,103 @@ main_layout =  html.Div([
                             "Display the variance explained per feature to help identify discriminatory groups across treatments.",
                                 target="variation-button",  # ID of the component to which the tooltip is attached
                                 placement="bottom"),
+                            ], style={'display': 'flex','margin-bottom': '10px'}),
+                    ], style={'display': 'inline-block', 'width': '35%', 'margin-left': '10px',  'margin-right': '10px', 'margin-top': '10px'}),
+                html.Div([
+                    dbc.Tabs(
+                        [
+                            dbc.Tab(pca_tab_content, label=" PCA "),
+                            dbc.Tab(plsda_tab_content, label=" PLS-DA "),
+                            dbc.Tab(volcano_tab_content, label=" Volcano plot "),
+                            dbc.Tab(fg_table_content, label=" Feature group list "),
+                        ]
+                            )
+                        ], style={'display': 'inline-block', 'width': '60%', 'vertical-align': 'top', 'margin-left': '10px', 'margin-top': '10px'}),
+            
+                html.Div([
+                       html.Hr(style={'borderTop': '2px powdergrey', 'margin': '5px 0'  })
+                         ], style={'padding': '5px'}),
+                html.Div(id='dynamic-content', style={'margin-left': '10px',  'margin-right': '10px'}),
+                ], id='main-content', style = {'display':'none', 'margin-top': '50px'})
+                ])
+
+# Below is the main layout, which include the tabs        
+main_layout =  html.Div([
+                    html.Div(navbar, style={'position': 'fixed', 'top': 0, 'left': 0, 'width': '100%', 'zIndex': 1000}),
+                    html.Div([dbc.Button("Display analytical dashboard", id='first-update-button', n_clicks=0, color="primary"),
+                              html.Div(id='info-update-button'),
+                                          ], 
+                            style={'position': 'absolute',  # Positioning the div absolutely inside its relative parent
+                                    'top': '50%',            # Centering vertically
+                                    'left': '50%',           # Centering horizontally
+                                    'transform': 'translate(-50%, -50%)'  # Adjusting the exact center position
+                                }, id = "first-button-display"),
+                    
+                    html.Div([
+                    html.Div([
+                    # Wrap the Graph in a Loading component
+                    dcc.Interval(id='update-interval', interval=500, n_intervals=0, max_intervals=-1, disabled = True), 
+                    dcc.Interval(id='network-interval', interval=1000, n_intervals=0, max_intervals=-1), 
+                    html.Div(id='network-intermediate', style={'display': 'none'}),
+                    dbc.Spinner(dcc.Graph(figure={'data': []}, id='network-graph', style={"height": "350px", "margin-bottom":"10px"}), 
+                                color="light", spinner_style={"width": "3rem", "height": "3rem"}),
+                  
+                   html.Div([
+                        dbc.InputGroup(
+                            [dbc.InputGroupText("RT +-", id='rt-input'),
+                                dbc.Input(id='rt-threshold', type="number", value=0.02, step=0.01, min=0, max=10),
+                                dbc.InputGroupText("min")],
+                                className="me-1",
+                                size="sm"), 
+
+                        dbc.InputGroup(
+                            [dbc.InputGroupText("Spearman Corr.", id='spearman-input'), 
+                             dbc.Input(id='correlation-threshold', 
+                                       type="number", value=0.9, step=0.01, min=0, max=1)],
+                            size="sm"
+                                ),
+                        dbc.Tooltip(
+                            "RT threshold to create a FG or a MFG.", #  It need to have at least 50% of same samples with values != 0 in both features to be valid. I.e you have 10 samples in total, in f1 if there is 10 samples with values != 0, and in f2 at least 5 samples with values !=0, the correlation is calculated.
+                            target="rt-threshold",  # ID of the component to which the tooltip is attached
+                            placement="top"),
+                        dbc.Tooltip(
+                            "NORMAL MODE: Spearman correlation accross samples for each pair of feature. META MODE: m/z threshold between two potential neutral mass.", #  It need to have at least 50% of same samples with values != 0 in both features to be valid. I.e you have 10 samples in total, in f1 if there is 10 samples with values != 0, and in f2 at least 5 samples with values !=0, the correlation is calculated.
+                            target="spearman-input",  # ID of the component to which the tooltip is attached
+                            placement="top")], style={'display': 'flex','margin-bottom': '10px'}),
+                    html.Div([
+                        dbc.Container([
+                            dbc.ButtonGroup([
+                                dbc.Button("Update", id='update-button', n_clicks=0, color="primary"),
+                                dbc.Button("Filtering", id='filter-button', n_clicks=0, color="secondary"),
+                                            ], class_name='equal-width-buttons'),
+                            dbc.ButtonGroup([
+                                dbc.Button("Export RDA", id='export-button', n_clicks=0, color="info"),
+                                dbc.Button("Variation", id='variation-button', n_clicks=0, color="warning"),
+                                ], class_name='equal-width-buttons'),
+                                ],
+                                    style={'text-align': 'center'},  # Center-align the content inside the container
+                                    fluid=True, className="d-flex flex-column justify-content-between"),
+                        dbc.Container([                            
+                            dbc.InputGroup(
+                                [dbc.InputGroupText("Sample threshold"), 
+                                 dbc.Input(id='sample-threshold', type="number", value=100, step=1, min=0, max=100),
+                                 dbc.InputGroupText("%")]
+                                    ),
+                            dbc.Button("(Meta) Update Intensities", id='update-intensities', n_clicks=0, color="primary"),],
+                                style={'text-align': 'center'},  # Center-align the content inside the container
+                                fluid=True, className="d-flex flex-column justify-content-between"),
+                        dbc.Tooltip(
+                            "In a Meta analysis, it calculates the statistics based on raw intensity value for each sample, not on the presence/absence.",
+                            target="update-intensities",  # ID of the component to which the tooltip is attached
+                            placement="top"),
+                        dbc.Tooltip(
+                        "Display the variance explained per feature to help identify discriminatory groups across treatments.",
+                            target="variation-button",  # ID of the component to which the tooltip is attached
+                            placement="bottom"),
+                        dbc.Tooltip(
+                        "Realize a statiscal test only if at least a signal is found in threshold % of the samples for each condition in a treatment level.",
+                            target="sample-threshold",  # ID of the component to which the tooltip is attached
+                            placement="top"),
                             ], style={'display': 'flex','margin-bottom': '10px'}),
                     ], style={'display': 'inline-block', 'width': '35%', 'margin-left': '10px',  'margin-right': '10px', 'margin-top': '10px'}),
                 html.Div([
