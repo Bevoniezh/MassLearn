@@ -3828,13 +3828,34 @@ def process_component(component, graph, experiment_index, all_pairs):
      Output("volcano-table-progress", "label"),
      Output('volcano-table-progress-div', 'style'),
      Output('volcano-table-div', 'style')],
-    Input('network-interval', 'n_intervals'),
+    [Input('update-button', 'n_clicks'),
+     Input('network-interval', 'n_intervals')],
     State('sample-threshold', 'value'),
     prevent_initial_call = True
 )
-def statistical_run(n, sample_threshold):
+def statistical_run(n_clicks, n, sample_threshold):
     global fg_table, fg_table_render, stat_proces_thread, network_updated, updating, loading_progress, pres_sample_threshold
     pres_sample_threshold = sample_threshold
+
+    ctx = dash.callback_context
+    trigger = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    # When the user clicks Update, re-enable the polling interval so we can
+    # start or monitor the statistical run once feature grouping finishes.
+    if trigger == 'update-button':
+        return (
+            dash.no_update,
+            False,
+            0,
+            '0 %',
+            dash.no_update,
+            dash.no_update,
+            0,
+            '0 %',
+            dash.no_update,
+            dash.no_update,
+        )
+
     if network_updated and stat_proces_thread == None:
         logging_config.log_info(
             logger,
@@ -3842,9 +3863,9 @@ def statistical_run(n, sample_threshold):
             project=_active_project(),
         )
         stat_proces_thread = start_run()
-        return dash.no_update, None, 0, '0 %', dash.no_update, dash.no_update, 0, '0 %', dash.no_update, dash.no_update
+        return dash.no_update, False, 0, '0 %', dash.no_update, dash.no_update, 0, '0 %', dash.no_update, dash.no_update
     elif network_updated and stat_proces_thread.is_alive():
-        return dash.no_update, None, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update
+        return dash.no_update, False, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update, loading_progress, f'{loading_progress} %', dash.no_update, dash.no_update
     elif network_updated and not(stat_proces_thread.is_alive()):
         logging_config.log_info(
             logger,
