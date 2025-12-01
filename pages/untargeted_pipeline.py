@@ -1426,7 +1426,7 @@ convert_raw = html.Div([
     prevent_initial_call=True
 )
 def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
-    global current_project, line_count
+    global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
 
     ctx = callback_context
     if not ctx.triggered:
@@ -1437,17 +1437,43 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
     if triggered == 'skip-noise-trace-button':
         current_project.noise_trace_threshold = None
         setattr(current_project, 'skip_noise_trace', True)
+        current_project.ms1_noise = 0
+        current_project.ms2_noise = 0
+        setattr(current_project, 'skip_ms_noise', True)
         cache.set('project_loaded', current_project)
         logging_config.log_info(logger, 'Noise trace removal skipped by the user.')
         separating_line = create_separating_line(line_count)
         line_count += 1
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
-        skip_notice = html.Div(
-            html.H6(
-                "Noise trace removal has been skipped. The pipeline will continue with the existing spectra.", style={'textAlign': 'center'}
-                )
+        skip_notice = dbc.Alert(
+            "Noise trace removal has been skipped. Background thresholds will not be defined because they rely on removed noise traces.",
+            color="info",
+            className="mb-3",
         )
-        return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
+
+        if not mzml_alternative:
+            try:
+                proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+            except SoftwarePathError as exc:
+                logging_config.log_warning(logger, str(exc))
+                warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+                return warning, False, False, 'n'
+        else:
+            proteowizard_path = None
+
+        global_progress = 0
+        failure = []
+        start_time = None
+        estimated_total_time = None
+
+        if mzml_alternative:
+            processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
+        else:
+            processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
+
+        processing_thread.start()
+
+        return [separating_line, new_popup, skip_notice, progress], True, True, 'y'
 
     if confirm_clicks and 0 < threshold < 101:
         current_project.noise_trace_threshold = threshold
