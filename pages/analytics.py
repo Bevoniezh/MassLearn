@@ -1143,7 +1143,6 @@ main_layout =  html.Div([
                                 }, id = "first-button-display"),
                     
                     html.Div([
-                    html.Div([
                     # Wrap the Graph in a Loading component
                     dcc.Interval(id='update-interval', interval=500, n_intervals=0, max_intervals=-1, disabled = True), 
                     dcc.Interval(id='network-interval', interval=1000, n_intervals=0, max_intervals=-1), 
@@ -1199,10 +1198,14 @@ main_layout =  html.Div([
                             "In a Meta analysis, it calculates the statistics based on raw intensity value for each sample, not on the presence/absence.",
                             target="update-intensities",  # ID of the component to which the tooltip is attached
                             placement="top"),
-                            dbc.Tooltip(
-                            "Realize a statiscal test only if at least a signal is found in threshold % of the samples for each condition in a treatment level.",
-                                target="sample-threshold",  # ID of the component to which the tooltip is attached
-                                placement="top"),
+                        dbc.Tooltip(
+                        "Realize a statiscal test only if at least a signal is found in threshold % of the samples for each condition in a treatment level.",
+                            target="sample-threshold",  # ID of the component to which the tooltip is attached
+                            placement="top"),
+                        dbc.Tooltip(
+                            "Display the variance explained per feature to help identify discriminatory groups across treatments.",
+                                target="variation-button",  # ID of the component to which the tooltip is attached
+                                placement="bottom"),
                             ], style={'display': 'flex','margin-bottom': '10px'}),
                     ], style={'display': 'inline-block', 'width': '35%', 'margin-left': '10px',  'margin-right': '10px', 'margin-top': '10px'}),
                 html.Div([
@@ -1657,7 +1660,24 @@ def display_variance_info():
             'if': {'row_index': 'odd'},
             'backgroundColor': 'rgb(245, 245, 245)' }]
                         ),
-    return var
+    description = html.Div([
+        html.P(
+            "The variation table summarizes how much each treatment level explains the standardized intensity of every feature (R² values).",
+            style={'marginBottom': '4px'}),
+        html.P(
+            "Higher percentages highlight feature groups that discriminate best between conditions; use the row selector to inspect specific features.",
+            style={'marginBottom': '8px'}),
+    ])
+
+    return html.Div(
+        [description, var],
+        style={
+            'margin-right': '10px',
+            'maxHeight': '420px',
+            'overflow': 'auto',
+            'margin-top': '10px',
+        },
+    )
 
     
 # Callback to update the hist once the dynamic content is clicked
