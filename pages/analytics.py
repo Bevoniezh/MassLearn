@@ -1169,7 +1169,7 @@ main_layout =  html.Div([
                             [dbc.InputGroupText("Shape Corr.", id='shape-input'),
                              dbc.Input(id='shape-threshold',
                                        type="number", value=0.7, step=0.01, min=0, max=1)],
-                            size="sm"
+                            size="sm", style = {'display' : 'none'}
                                 ),
                         dbc.Tooltip(
                             "RT threshold to create a FG or a MFG.", #  It need to have at least 50% of same samples with values != 0 in both features to be valid. I.e you have 10 samples in total, in f1 if there is 10 samples with values != 0, and in f2 at least 5 samples with values !=0, the correlation is calculated.
