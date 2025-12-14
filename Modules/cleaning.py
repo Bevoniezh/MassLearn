@@ -297,8 +297,10 @@ class Spectra():
         self.rt1 = []
         self.rt2 = []
         
-    def extract_peaks(self, Noise1 = 400, Noise2 = 200): # Noise1 is a treshold for noise of MS1, Noise2 is for MS2
+    def extract_peaks(self, Noise1 = 400, Noise2 = 200, apply_background_filter: bool = True): # Noise1 is a treshold for noise of MS1, Noise2 is for MS2
         self.denoised = {'Noise MS1' : Noise1, 'Noise MS2' : Noise2} # to indicate what was remove from noise background
+        self.noise_detection_thresholds = {'MS1': Noise1, 'MS2': Noise2}
+        self.use_detection_threshold_only = not apply_background_filter
         self.peaks1 = []
         self.peaks2 = []
         self.tic1 = []
@@ -324,7 +326,8 @@ class Spectra():
                     peaks = np.column_stack((spectrum.mz, spectrum.i))
 
                     # Filter the data
-                    peaks = peaks[np.where(peaks[:, 1] >= Noise1 )] # Masses above Noise treshold
+                    if apply_background_filter:
+                        peaks = peaks[np.where(peaks[:, 1] >= Noise1 )] # Masses above Noise treshold
                     peaks = peaks[np.where(np.floor(peaks[:, 0] % 1 <= 0.8))] # Masses with removed decimals , < x.8
                     if not(peaks.any()):
                         peaks = np.array([[1000.00000, 1]]) # if there is nothing in the spectra we add a mock peak alone in the spectrum originally, for everything below the noise or with wrong decimal
@@ -335,7 +338,8 @@ class Spectra():
                 # MS level 2, same as MS level 1:
                 else:
                     peaks = np.column_stack((spectrum.mz, spectrum.i))
-                    peaks = peaks[np.where(peaks[:, 1] >= Noise2 )] # Masses above Noise treshold
+                    if apply_background_filter:
+                        peaks = peaks[np.where(peaks[:, 1] >= Noise2 )] # Masses above Noise treshold
                     peaks = peaks[np.where(np.floor(peaks[:, 0] % 1 <= 0.8))] # Masses with removed decimals , < x.8
                     if not(peaks.any()):
                         peaks = np.array([[1000.00000, 1]]) # We add a mock peak alone in the spectrum originally, everything is below the noise or with wrong decimal
@@ -494,7 +498,28 @@ class Spectra():
             Threshold,
         )
 
-        if not Peaks:
+        detection_only = getattr(self, 'use_detection_threshold_only', False)
+        detection_threshold = self.noise_detection_thresholds.get(level, 0) if detection_only else 0
+
+        if detection_only and detection_threshold:
+            filtered_peaks = []
+            for spectra_peaks in Peaks:
+                mask = spectra_peaks[:, 1] >= detection_threshold
+                filtered = spectra_peaks[mask]
+                if filtered.size == 0:
+                    filtered = np.array([[0.0, 0.0]])
+                filtered_peaks.append(filtered)
+            Peaks_for_trace = filtered_peaks
+            logging_config.log_info(
+                logger,
+                'Applying %s background thresholds as detection-only filters (minimum intensity=%s).',
+                level,
+                detection_threshold,
+            )
+        else:
+            Peaks_for_trace = Peaks
+
+        if not Peaks_for_trace:
             logging_config.log_error(
                 logger,
                 'No %s peaks extracted from %s. Unable to compute noise traces.',
@@ -514,7 +539,7 @@ class Spectra():
             raise ValueError(f'Empty {level} peak array for noise trace computation.')
 
         try:
-            peaks_concat = np.concatenate(Peaks)
+            peaks_concat = np.concatenate(Peaks_for_trace)
         except ValueError as exc:
             logging_config.log_exception(
                 logger,
@@ -526,7 +551,7 @@ class Spectra():
             raise
         peaks_concat[:,0] = np.round(peaks_concat[:,0], 3) # round only the mz values
         unique_mass, inverse_indices, counts = np.unique(peaks_concat[:,0], return_counts=True, return_inverse=True) # return count mean how many time a (unique) m/z is counted over all the array, meaning over all the scans
-        counts = np.round(counts / len(Peaks) * 100, 2)
+        counts = np.round(counts / len(Peaks_for_trace) * 100, 2)
         sums = np.bincount(inverse_indices, weights=peaks_concat[:,1]) # Calculate sum of intensities for each unique mass value
         indices = np.where(counts >= Threshold)[0] # Get the indices of mass values that appear in at least 50% of the scans
         result = np.column_stack((unique_mass[indices], counts[indices], sums[indices])) # Combine unique mass, counts, and sums into a single 2D array
