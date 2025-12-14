@@ -235,7 +235,8 @@ def _ensure_spectra_cache(project, project_context=None) -> dict:
             continue
         try:
             spectra = cleaning.Spectra(mzml_path)
-            spectra.extract_peaks(ms1_noise, ms2_noise)
+            apply_background_filter = not getattr(project, "use_noise_threshold_for_detection", False)
+            spectra.extract_peaks(ms1_noise, ms2_noise, apply_background_filter=apply_background_filter)
             rebuilt_cache[sample_name] = _spectra_dicts_from_peaks(spectra)
         except Exception as exc:  # pragma: no cover - defensive logging
             logging_config.log_exception(
@@ -1444,7 +1445,7 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
         skip_notice = html.Div(
             html.H6(
-                "Noise trace removal has been skipped. The pipeline will continue with the existing spectra.", style={'textAlign': 'center'}
+                "Noise trace removal has been skipped. Background noise thresholds will also be bypassed.", style={'textAlign': 'center'}
                 )
         )
         return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
@@ -1539,12 +1540,13 @@ noise_threshold = html.Div([
      Output({'type': 'popup', 'index': 5}, 'children')
      ],
     [Input('ms-noise-button', 'n_clicks'),
-     Input('skip-ms-noise-button', 'n_clicks')],
+     Input('skip-ms-noise-button', 'n_clicks'),
+     Input('skip-noise-trace-button', 'n_clicks')],
     [State('ms1-noise', 'value'),
      State('ms2-noise', 'value')],
     prevent_initial_call=True
 )
-def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
+def validate_ms_noise_input(confirm_clicks, skip_clicks, skip_noise_trace_clicks, ms1, ms2):
     global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
 
     ctx = callback_context
@@ -1552,7 +1554,7 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
         raise PreventUpdate()
 
     triggered = ctx.triggered_id
-    skip_thresholds = triggered == 'skip-ms-noise-button'
+    skip_thresholds = triggered in {'skip-ms-noise-button', 'skip-noise-trace-button'}
 
     if skip_thresholds:
         ms1_value = 0
@@ -1576,6 +1578,12 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     current_project.ms1_noise = ms1_value
     current_project.ms2_noise = ms2_value
     setattr(current_project, 'skip_ms_noise', skip_thresholds)
+
+    skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
+
+    use_detection_threshold_only = not skip_thresholds and not skip_noise_trace
+    setattr(current_project, 'use_noise_threshold_for_detection', use_detection_threshold_only)
+    setattr(current_project, 'apply_background_filter', not use_detection_threshold_only)
     cache.set('project_loaded', current_project)
 
     skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
@@ -1749,7 +1757,8 @@ def process_files(files, proteowizard_path):
             else:
                 # Denoise the file
                 spectra = cleaning.Spectra(rawfolder_mzmlfile_path) # take all the spectra data
-                spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise) # peak variable is only here to allow loading bar to not be disturbe
+                apply_background_filter = getattr(current_project, 'apply_background_filter', True)
+                spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise, apply_background_filter=apply_background_filter) # peak variable is only here to allow loading bar to not be disturbe
 
                 skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
 
@@ -1827,7 +1836,12 @@ def process_mzml_files(files):
         sample_name = os.path.basename(rawfile_path_noext)
         try:
             spectra = cleaning.Spectra(file)
-            spectra.extract_peaks(current_project.ms1_noise, current_project.ms2_noise)
+            apply_background_filter = getattr(current_project, 'apply_background_filter', True)
+            spectra.extract_peaks(
+                current_project.ms1_noise,
+                current_project.ms2_noise,
+                apply_background_filter=apply_background_filter,
+            )
 
             skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
 
