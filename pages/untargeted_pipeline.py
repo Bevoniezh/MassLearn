@@ -1470,8 +1470,18 @@ noise_threshold = html.Div([
     it is likely noise rather than a true feature. For shorter elution windows, increase this percentage;\
     for longer windows, decrease it.\
     Masses ending in > x.8 Da are also discarded as non-natural (e.g 101.850 Da).\
-    \n!!! Lower thresholds increase processing time !!!""", 
+    \n!!! Lower thresholds increase processing time !!!\
+    \n\nBelow find a 2D plot from MZmine of a noisy QToF sample:""", 
     color="warning", style={'maxWidth': '700px', 'fontSize': '14px', 'padding-left': '5px','padding-right': '5px',}),
+                        html.Br(),
+                        html.Img(
+                            src="/assets/noise_trace.png",
+                            style={
+                                "maxWidth": "100%",
+                                "marginTop": "10px",
+                                "borderRadius": "6px"
+                            }
+                        ),
                         html.Br(),
                         html.H1(''),
                         html.H5('Enter the Noise trace threshold and click on "Confirm noise trace"', style={'textAlign': 'center'}),                        
@@ -1508,7 +1518,7 @@ noise_threshold = html.Div([
                             className="d-flex justify-content-center",
                         ),
                         dbc.Tooltip(
-                            "If a m/z (+- 0.005 Da) is detected > Threshold % of the whole elution time range, this m/z (+- 0.005 Da) is deleted).",
+                            "If a specific m/z (+- 0.005 Da) is detected > Threshold % of the whole elution time range, this m/z (+- 0.005 Da) is deleted).",
                             target="noise-threshold",  # ID of the component to which the tooltip is attached
                             placement="right"),
                         html.Br(),
@@ -1664,7 +1674,8 @@ ms_noise = html.Div([
                                 outline=True,
                                 n_clicks=0,
                                 className="ms-2",
-                            ),
+                                style={"display": "none"},
+                            )
                         ],
                         className="d-flex justify-content-center",
                     ),
