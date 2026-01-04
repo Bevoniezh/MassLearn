@@ -28,9 +28,10 @@ logger = logging.getLogger(__name__)
 class Denoise(): 
     """
     Denoise manage file per file removing the noise from mzML files.
-    First all background noise (the flat noise present in all the mass spectra) is removed below defined
-    threshold of 400 count (intensity) for all mass in MS1 and 200 in MS2. This step decrease by more than 50% the size of the mzML file at the cost we cannot
-    detect anything below this treshold anymore. It is rare the information below this treshold being relevant in majority of full scan analysis cases.
+    Background noise thresholds (400 counts in MS1 and 200 in MS2 by default) define the minimum
+    intensity considered when detecting systematic noise traces, but the raw mzML data are no longer
+    filtered by those thresholds. Only the traces identified as noise are removed from the exported
+    mzML, preserving lower-intensity signals that are not part of a noise trace.
     
     Denoise() uses Spectra() class to denoise. Denoise() is a class to link Spectra() methods to the mzML files.
     Then, a noise is identified by one property: If a m/z (+-0.005Da) is present at least 20% (Threshold_scans variable, can be more or less depending on the user
@@ -166,8 +167,9 @@ class Denoise():
             dfp1 = spectra.detect_peak(dft1) # from the noise traces, we try to detect significant peak for those peaks not to be erased from the peak list
             dfp2 = spectra.detect_peak(dft2)
 
-            pkma1, tic1, base1, length1 = spectra.noise_terminator(dfp1, spectra.peakarray1) # pkma is the masked array of peaks, the mask substract noise trace from the mass list at the exeption of significant peaks in noise trace if some are present
-            pkma2, tic2, base2, length2 = spectra.noise_terminator(dfp2, spectra.peakarray2)
+            # Apply noise masking to full spectra so low-intensity signals are preserved unless part of a detected noise trace
+            pkma1, tic1, base1, length1 = spectra.noise_terminator(dfp1, spectra.full_peakarray1) # pkma is the masked array of peaks, the mask substract noise trace from the mass list at the exeption of significant peaks in noise trace if some are present
+            pkma2, tic2, base2, length2 = spectra.noise_terminator(dfp2, spectra.full_peakarray2)
 
             logging_config.log_info(
                 logger,
@@ -284,8 +286,12 @@ class Spectra():
         self.path = Filename
         self.peaks1 = [] # extract_peaks have to be called before updating the peaks, mz and intensities
         self.peaks2 = []
+        self.all_peaks1 = []  # Peaks without intensity-based background filtering
+        self.all_peaks2 = []
         self.peakarray1 = []
         self.peakarray2 = []
+        self.full_peakarray1 = []
+        self.full_peakarray2 = []
         self.length1 = [] #to store the length of each ms1 spectra (original and filtered)
         self.length2 = [] 
         self.dfp1 = []
@@ -301,6 +307,8 @@ class Spectra():
         self.denoised = {'Noise MS1' : Noise1, 'Noise MS2' : Noise2} # to indicate what was remove from noise background
         self.peaks1 = []
         self.peaks2 = []
+        self.all_peaks1 = []
+        self.all_peaks2 = []
         self.tic1 = []
         self.tic2 = []
         self.length1 = []
@@ -309,6 +317,8 @@ class Spectra():
         self.rt2 = []
         peak1_lengths = [] # to have the lenght of the spectra, to at the end having the longest one
         peak2_lengths = []
+        all_peak1_lengths = []
+        all_peak2_lengths = []
         logging_config.log_info(
             logger,
             'Extracting peaks for %s with MS1 noise=%s and MS2 noise=%s.',
@@ -324,25 +334,31 @@ class Spectra():
                     peaks = np.column_stack((spectrum.mz, spectrum.i))
 
                     # Filter the data
-                    peaks = peaks[np.where(peaks[:, 1] >= Noise1 )] # Masses above Noise treshold
                     peaks = peaks[np.where(np.floor(peaks[:, 0] % 1 <= 0.8))] # Masses with removed decimals , < x.8
-                    if not(peaks.any()):
-                        peaks = np.array([[1000.00000, 1]]) # if there is nothing in the spectra we add a mock peak alone in the spectrum originally, for everything below the noise or with wrong decimal
+                    self.all_peaks1.append(peaks)
+
+                    detection_peaks = peaks[np.where(peaks[:, 1] >= Noise1 )] # Masses above Noise treshold
+                    if not(detection_peaks.any()):
+                        detection_peaks = np.array([[1000.00000, 1]]) # if there is nothing in the spectra we add a mock peak alone in the spectrum originally, for everything below the noise or with wrong decimal
                         empty_ms1 += 1
-                    self.peaks1.append(peaks)
+                    self.peaks1.append(detection_peaks)
                     self.rt1.append(round(spectrum.__getitem__("MS:1000016"), 4)) # add the retention time from the spectra to the list of rt
-                    peak1_lengths.append(len(peaks))
+                    peak1_lengths.append(len(detection_peaks))
+                    all_peak1_lengths.append(len(peaks))
                 # MS level 2, same as MS level 1:
                 else:
                     peaks = np.column_stack((spectrum.mz, spectrum.i))
-                    peaks = peaks[np.where(peaks[:, 1] >= Noise2 )] # Masses above Noise treshold
                     peaks = peaks[np.where(np.floor(peaks[:, 0] % 1 <= 0.8))] # Masses with removed decimals , < x.8
-                    if not(peaks.any()):
-                        peaks = np.array([[1000.00000, 1]]) # We add a mock peak alone in the spectrum originally, everything is below the noise or with wrong decimal
+                    self.all_peaks2.append(peaks)
+
+                    detection_peaks = peaks[np.where(peaks[:, 1] >= Noise2 )] # Masses above Noise treshold
+                    if not(detection_peaks.any()):
+                        detection_peaks = np.array([[1000.00000, 1]]) # We add a mock peak alone in the spectrum originally, everything is below the noise or with wrong decimal
                         empty_ms2 += 1
-                    self.peaks2.append(peaks)
+                    self.peaks2.append(detection_peaks)
                     self.rt2.append(round(spectrum.__getitem__("MS:1000016"), 4))
-                    peak2_lengths.append(len(peaks))
+                    peak2_lengths.append(len(detection_peaks))
+                    all_peak2_lengths.append(len(peaks))
 
         if peak1_lengths:
             max_length = max(peak1_lengths) # max_length is necessary because peakarray is an array, so all dimensions must have same length, meaning the length of the longest peaks1 array
@@ -371,6 +387,22 @@ class Spectra():
                 self.filename,
             )
             self.peakarray2 = np.zeros((0, 0, 2))
+
+        if all_peak1_lengths:
+            max_length = max(all_peak1_lengths)
+            self.full_peakarray1 = np.zeros((len(self.all_peaks1), max_length, 2))
+            for i, arr in enumerate(self.all_peaks1):
+                self.full_peakarray1[i, :len(arr)] = arr
+        else:
+            self.full_peakarray1 = np.zeros((0, 0, 2))
+
+        if all_peak2_lengths:
+            max_length = max(all_peak2_lengths)
+            self.full_peakarray2 = np.zeros((len(self.all_peaks2), max_length, 2))
+            for i, arr in enumerate(self.all_peaks2):
+                self.full_peakarray2[i, :len(arr)] = arr
+        else:
+            self.full_peakarray2 = np.zeros((0, 0, 2))
 
         logging_config.log_info(
             logger,
@@ -414,7 +446,8 @@ class Spectra():
                 level,
                 self.filename,
             )
-            return [], [], [], []
+            empty_arrays = [np.zeros((0, 2)) for _ in range(Peakarray.shape[0])]
+            return empty_arrays, [0 for _ in empty_arrays], [(0, 0) for _ in empty_arrays], [0 for _ in empty_arrays]
 
         # Create a mask for peakarray masses
         mask = np.full((Peakarray.shape[0], Peakarray.shape[1]), False)
