@@ -1426,7 +1426,7 @@ convert_raw = html.Div([
     prevent_initial_call=True
 )
 def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
-    global current_project, line_count
+    global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
 
     ctx = callback_context
     if not ctx.triggered:
@@ -1437,17 +1437,42 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
     if triggered == 'skip-noise-trace-button':
         current_project.noise_trace_threshold = None
         setattr(current_project, 'skip_noise_trace', True)
+        current_project.ms1_noise = 0
+        current_project.ms2_noise = 0
+        setattr(current_project, 'skip_ms_noise', True)
         cache.set('project_loaded', current_project)
         logging_config.log_info(logger, 'Noise trace removal skipped by the user.')
+
+        if not mzml_alternative:
+            try:
+                proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
+            except SoftwarePathError as exc:
+                logging_config.log_warning(logger, str(exc))
+                warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
+                return warning, False, False, 'n'
+        else:
+            proteowizard_path = None
+
+        global_progress = 0
+        failure = []
+        start_time = None
+        estimated_total_time = None
+
+        if mzml_alternative:
+            processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
+        else:
+            processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
+        processing_thread.start()
+
         separating_line = create_separating_line(line_count)
         line_count += 1
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
         skip_notice = html.Div(
             html.H6(
-                "Noise trace removal has been skipped. The pipeline will continue with the existing spectra.", style={'textAlign': 'center'}
+                "Noise trace removal and MS1/MS2 background thresholds were skipped. Processing will continue without cleaning.", style={'textAlign': 'center'}
                 )
         )
-        return [separating_line, new_popup, skip_notice, ms_noise], True, True, 'y'
+        return [separating_line, new_popup, skip_notice, progress], True, True, 'y'
 
     if confirm_clicks and 0 < threshold < 101:
         current_project.noise_trace_threshold = threshold
@@ -1553,6 +1578,11 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
 
     triggered = ctx.triggered_id
     skip_thresholds = triggered == 'skip-ms-noise-button'
+    skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
+
+    if skip_thresholds and not skip_noise_trace:
+        # Users who opted into noise trace removal must provide MS1/MS2 thresholds.
+        raise PreventUpdate()
 
     if skip_thresholds:
         ms1_value = 0
@@ -1577,8 +1607,6 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     current_project.ms2_noise = ms2_value
     setattr(current_project, 'skip_ms_noise', skip_thresholds)
     cache.set('project_loaded', current_project)
-
-    skip_noise_trace = getattr(current_project, 'skip_noise_trace', False)
 
     if skip_thresholds:
         logging_config.log_info(logger, 'MS1/MS2 noise thresholds skipped by the user.')
