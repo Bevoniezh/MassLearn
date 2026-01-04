@@ -1440,6 +1440,7 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         current_project.ms1_noise = 0
         current_project.ms2_noise = 0
         setattr(current_project, 'skip_ms_noise', True)
+        setattr(current_project, 'skip_all_processing', True)
         cache.set('project_loaded', current_project)
         logging_config.log_info(logger, 'Noise trace removal skipped by the user.')
 
@@ -1631,6 +1632,7 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
         )
 
     skip_all_processing = skip_thresholds and skip_noise_trace
+    setattr(current_project, 'skip_all_processing', skip_all_processing)
 
     global_progress = 0
     failure = []
@@ -1945,10 +1947,13 @@ def update_conversion_progress(n):
             thread_project.start()
             separating_line = create_separating_line(line_count)
             line_count += 1
+            skip_all_processing = getattr(current_project, 'skip_all_processing', False)
             if mzml_alternative:
                 completion_message = "Denoising complete"
             else:
                 completion_message = "Conversion and denoising complete"
+            if skip_all_processing:
+                completion_message = "Processing skipped; existing spectra reused"
             return [separating_line, template_part], progress, f"{progress}%" if progress > 0 else "", None, completion_message, True
         else:
             separating_line = create_separating_line(line_count)
