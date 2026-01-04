@@ -1672,9 +1672,9 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     return [separating_line, new_popup, progress], True, True, 'y'
 ms_noise = html.Div([ 
                 html.Div([        
-                    dbc.ListGroupItem("""For convenience, all masses with an intensity (or count) lower than 400 for MS1 and 200 for MS2 will be removed by default. \
-        Thoses masses represent the background noise, which is different from the noises traces. \
-        We HIGHLY recommend to remove those low m/z counts, otherwise further steps will take a lot of time.\
+                    dbc.ListGroupItem("""For convenience, the thresholds below (400 for MS1 and 200 for MS2 by default) are used to identify systematic noise traces only. \
+        Signals below these values stay in the mzML; they are merely ignored when deciding which m/z values form a recurring noise trace. \
+        We HIGHLY recommend keeping these thresholds, otherwise further steps will take a lot of time.\
                 """, color="warning", style={'maxWidth': '700px', 'fontSize': '14px', 'padding-left': '5px','padding-right': '5px',}),
                     html.Br(),
                     html.H1(''),

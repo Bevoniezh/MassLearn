@@ -115,8 +115,8 @@ class Denoise():
         )
 
         try:
-            res1, dft1 = spectra.noise_trace(spectra.peaks1, spectra.peakarray1, Threshold = Threshold_scans) # take noise trace information
-            res2, dft2 = spectra.noise_trace(spectra.peaks2, spectra.peakarray2, Threshold = Threshold_scans)
+            res1, dft1 = spectra.noise_trace(spectra.noise_peaks1, spectra.noise_peakarray1, Threshold = Threshold_scans, level='MS1') # take noise trace information
+            res2, dft2 = spectra.noise_trace(spectra.noise_peaks2, spectra.noise_peakarray2, Threshold = Threshold_scans, level='MS2')
 
             dft1_sorted = dft1.sort_index(ascending=True)  # Sort by index in ascending order
             rounded_values_dft1 = [str(round(value, 4)) for value in list(dft1_sorted.index)]
@@ -286,10 +286,12 @@ class Spectra():
         self.path = Filename
         self.peaks1 = [] # extract_peaks have to be called before updating the peaks, mz and intensities
         self.peaks2 = []
-        self.all_peaks1 = []  # Peaks without intensity-based background filtering
-        self.all_peaks2 = []
-        self.peakarray1 = []
+        self.noise_peaks1 = []  # Peaks used to identify noise traces (intensity-filtered)
+        self.noise_peaks2 = []
+        self.peakarray1 = []  # Full spectra (decimal-filtered only)
         self.peakarray2 = []
+        self.noise_peakarray1 = []  # Intensity-filtered spectra for noise trace detection
+        self.noise_peakarray2 = []
         self.full_peakarray1 = []
         self.full_peakarray2 = []
         self.length1 = [] #to store the length of each ms1 spectra (original and filtered)
@@ -307,8 +309,8 @@ class Spectra():
         self.denoised = {'Noise MS1' : Noise1, 'Noise MS2' : Noise2} # to indicate what was remove from noise background
         self.peaks1 = []
         self.peaks2 = []
-        self.all_peaks1 = []
-        self.all_peaks2 = []
+        self.noise_peaks1 = []
+        self.noise_peaks2 = []
         self.tic1 = []
         self.tic2 = []
         self.length1 = []
@@ -317,8 +319,8 @@ class Spectra():
         self.rt2 = []
         peak1_lengths = [] # to have the lenght of the spectra, to at the end having the longest one
         peak2_lengths = []
-        all_peak1_lengths = []
-        all_peak2_lengths = []
+        noise_peak1_lengths = []
+        noise_peak2_lengths = []
         logging_config.log_info(
             logger,
             'Extracting peaks for %s with MS1 noise=%s and MS2 noise=%s.',
@@ -335,30 +337,34 @@ class Spectra():
 
                     # Filter the data
                     peaks = peaks[np.where(np.floor(peaks[:, 0] % 1 <= 0.8))] # Masses with removed decimals , < x.8
-                    self.all_peaks1.append(peaks)
+                    if not(peaks.any()):
+                        peaks = np.array([[1000.00000, 1]]) # if there is nothing in the spectra we add a mock peak alone in the spectrum originally, for everything below the noise or with wrong decimal
+                        empty_ms1 += 1
+                    self.peaks1.append(peaks)
 
                     detection_peaks = peaks[np.where(peaks[:, 1] >= Noise1 )] # Masses above Noise treshold
                     if not(detection_peaks.any()):
                         detection_peaks = np.array([[1000.00000, 1]]) # if there is nothing in the spectra we add a mock peak alone in the spectrum originally, for everything below the noise or with wrong decimal
-                        empty_ms1 += 1
-                    self.peaks1.append(detection_peaks)
+                    self.noise_peaks1.append(detection_peaks)
                     self.rt1.append(round(spectrum.__getitem__("MS:1000016"), 4)) # add the retention time from the spectra to the list of rt
-                    peak1_lengths.append(len(detection_peaks))
-                    all_peak1_lengths.append(len(peaks))
+                    peak1_lengths.append(len(peaks))
+                    noise_peak1_lengths.append(len(detection_peaks))
                 # MS level 2, same as MS level 1:
                 else:
                     peaks = np.column_stack((spectrum.mz, spectrum.i))
                     peaks = peaks[np.where(np.floor(peaks[:, 0] % 1 <= 0.8))] # Masses with removed decimals , < x.8
-                    self.all_peaks2.append(peaks)
+                    if not(peaks.any()):
+                        peaks = np.array([[1000.00000, 1]]) # We add a mock peak alone in the spectrum originally, everything is below the noise or with wrong decimal
+                        empty_ms2 += 1
+                    self.peaks2.append(peaks)
 
                     detection_peaks = peaks[np.where(peaks[:, 1] >= Noise2 )] # Masses above Noise treshold
                     if not(detection_peaks.any()):
                         detection_peaks = np.array([[1000.00000, 1]]) # We add a mock peak alone in the spectrum originally, everything is below the noise or with wrong decimal
-                        empty_ms2 += 1
-                    self.peaks2.append(detection_peaks)
+                    self.noise_peaks2.append(detection_peaks)
                     self.rt2.append(round(spectrum.__getitem__("MS:1000016"), 4))
-                    peak2_lengths.append(len(detection_peaks))
-                    all_peak2_lengths.append(len(peaks))
+                    peak2_lengths.append(len(peaks))
+                    noise_peak2_lengths.append(len(detection_peaks))
 
         if peak1_lengths:
             max_length = max(peak1_lengths) # max_length is necessary because peakarray is an array, so all dimensions must have same length, meaning the length of the longest peaks1 array
@@ -388,21 +394,25 @@ class Spectra():
             )
             self.peakarray2 = np.zeros((0, 0, 2))
 
-        if all_peak1_lengths:
-            max_length = max(all_peak1_lengths)
-            self.full_peakarray1 = np.zeros((len(self.all_peaks1), max_length, 2))
-            for i, arr in enumerate(self.all_peaks1):
-                self.full_peakarray1[i, :len(arr)] = arr
-        else:
-            self.full_peakarray1 = np.zeros((0, 0, 2))
+        # Full peak arrays mirror the unfiltered (decimal-only) spectra and are used to rewrite mzML data
+        self.full_peakarray1 = np.copy(self.peakarray1)
+        self.full_peakarray2 = np.copy(self.peakarray2)
 
-        if all_peak2_lengths:
-            max_length = max(all_peak2_lengths)
-            self.full_peakarray2 = np.zeros((len(self.all_peaks2), max_length, 2))
-            for i, arr in enumerate(self.all_peaks2):
-                self.full_peakarray2[i, :len(arr)] = arr
+        if noise_peak1_lengths:
+            max_length = max(noise_peak1_lengths)
+            self.noise_peakarray1 = np.zeros((len(self.noise_peaks1), max_length, 2))
+            for i, arr in enumerate(self.noise_peaks1):
+                self.noise_peakarray1[i, :len(arr)] = arr
         else:
-            self.full_peakarray2 = np.zeros((0, 0, 2))
+            self.noise_peakarray1 = np.zeros((0, 0, 2))
+
+        if noise_peak2_lengths:
+            max_length = max(noise_peak2_lengths)
+            self.noise_peakarray2 = np.zeros((len(self.noise_peaks2), max_length, 2))
+            for i, arr in enumerate(self.noise_peaks2):
+                self.noise_peakarray2[i, :len(arr)] = arr
+        else:
+            self.noise_peakarray2 = np.zeros((0, 0, 2))
 
         logging_config.log_info(
             logger,
@@ -514,9 +524,15 @@ class Spectra():
 
 
     #Function to get all the noise trace FOR ONE MS LEVEL based on their grouping woth a specific +- xx.xxx Da delta and a threshold of minimum number of scans when there 
-    def noise_trace(self, Peaks, Peakarray, Delta = 0.005, Threshold = 20):
+    def noise_trace(self, Peaks, Peakarray, Delta = 0.005, Threshold = 20, level=None):
         # Get all the possible noise trace if they appear in a minimum number of scans based on Threshold (% of scans)
-        level = 'MS1' if Peaks is self.peaks1 else 'MS2'
+        if level is None:
+            if Peakarray is self.noise_peakarray1:
+                level = 'MS1'
+            elif Peakarray is self.noise_peakarray2:
+                level = 'MS2'
+            else:
+                level = 'MS1' if Peaks is self.peaks1 else 'MS2'
         logging_config.log_info(
             logger,
             'Computing %s noise traces for %s (spectra=%d, delta=%s, threshold=%s).',
@@ -633,7 +649,7 @@ class Spectra():
             df_trace.shape,
         )
 
-        if Peaks is self.peaks1:
+        if level == 'MS1':
             self.dft1 = df_trace
         else:
             self.dft2 = df_trace
