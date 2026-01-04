@@ -1468,11 +1468,23 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         line_count += 1
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
         skip_notice = html.Div(
-            html.H6(
-                "Noise trace removal and MS1/MS2 background thresholds were skipped. Processing will continue without cleaning.", style={'textAlign': 'center'}
-                )
+            [
+                html.H6(
+                    "Noise trace removal and MS1/MS2 background thresholds were skipped. Processing will continue without cleaning.",
+                    style={'textAlign': 'center'}
+                ),
+                html.Br(),
+            ]
         )
-        return [separating_line, new_popup, skip_notice, progress], True, True, 'y'
+        skip_progress = html.Div(
+            [
+                separating_line,
+                new_popup,
+                skip_notice,
+                progress,
+            ]
+        )
+        return skip_progress, True, True, 'y'
 
     if confirm_clicks and 0 < threshold < 101:
         current_project.noise_trace_threshold = threshold
@@ -1664,7 +1676,7 @@ ms_noise = html.Div([
                 """, color="warning", style={'maxWidth': '700px', 'fontSize': '14px', 'padding-left': '5px','padding-right': '5px',}),
                     html.Br(),
                     html.H1(''),
-                    html.H5('Enter the Noise threshold and click on "Begin processing"', style={'textAlign': 'center'}),
+                    html.H5('Enter the Noise threshold and click on "Continue"', style={'textAlign': 'center'}),
                     dbc.InputGroup([ 
                         dbc.InputGroupText("MS level 1 minimum intensity detectable"),  # Adding a label
                         dbc.Input(id='ms1-noise', 
@@ -1676,21 +1688,21 @@ ms_noise = html.Div([
                         dbc.InputGroupText("ions"),  # Adding "%" at the end of the input bar
                             ], style={'maxWidth': '690px'}),
                     html.Br(),
-                    dbc.InputGroup([ 
+                    dbc.InputGroup([
                         dbc.InputGroupText("MS level 2 minimum intensity detectable"),  # Adding a label
-                        dbc.Input(id='ms2-noise', 
-                                  type="number", 
-                                  value=200, 
+                        dbc.Input(id='ms2-noise',
+                                  type="number",
+                                  value=200,
                                   min=0,    # Minimum value allowed
                                   step=1,   # Increment step
                                   size="sm"),  # Set the size of the input
                         dbc.InputGroupText("ions"),  # Adding "%" at the end of the input bar
-                            ], style={'maxWidth': '690px'}),
+                    ], style={'maxWidth': '690px'}),
                     html.Br(),
                     html.Div(
                         [
                             dbc.Button(
-                                "Begin processing",
+                                "Continue",
                                 id="ms-noise-button",
                                 color="primary",
                                 n_clicks=0,
