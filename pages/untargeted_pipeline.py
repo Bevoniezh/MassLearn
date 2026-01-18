@@ -1440,56 +1440,27 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
     if triggered == 'skip-noise-trace-button':
         current_project.noise_trace_threshold = None
         setattr(current_project, 'skip_noise_trace', True)
-        current_project.ms1_noise = 0
-        current_project.ms2_noise = 0
-        setattr(current_project, 'skip_ms_noise', True)
-        setattr(current_project, 'skip_all_processing', True)
         cache.set('project_loaded', current_project)
         logging_config.log_info(logger, 'Noise trace removal skipped by the user.')
-
-        if not mzml_alternative:
-            try:
-                proteowizard_path = _get_configured_software_path('ProteoWizard', 'ProteoWizard (msconvert.exe)')
-            except SoftwarePathError as exc:
-                logging_config.log_warning(logger, str(exc))
-                warning = dbc.ListGroupItem(str(exc), color="warning", style=SOFTWARE_WARNING_STYLE)
-                return warning, False, False, 'n'
-        else:
-            proteowizard_path = None
-
-        global_progress = 0
-        failure = []
-        start_time = None
-        estimated_total_time = None
-        processing_complete = False
-
-        if mzml_alternative:
-            processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
-        else:
-            processing_thread = threading.Thread(target=process_files, args=(current_project.raw_files_path, proteowizard_path))
-        processing_thread.start()
 
         separating_line = create_separating_line(line_count)
         line_count += 1
         new_popup = html.Div(children='', id={"type": "popup", "index": 5}, style={'display': 'none'})
-        skip_notice = html.Div(
-            [
-                html.H6(
-                    "Noise trace removal and MS1/MS2 background thresholds were skipped. Processing will continue without cleaning.",
-                    style={'textAlign': 'center'}
-                ),
-                html.Br(),
-            ]
+        skip_notice = dbc.Alert(
+            "Noise trace removal was skipped. Continue with MS1/MS2 thresholds below.",
+            color="info",
+            className="mb-3",
+            style={"maxWidth": "700px"},
         )
-        skip_progress = html.Div(
+        skip_noise_trace_flow = html.Div(
             [
                 separating_line,
                 new_popup,
-                skip_notice,
-                progress,
+                html.Div(skip_notice, style={'display': 'flex', 'justifyContent': 'center'}),
+                ms_noise,
             ]
         )
-        return skip_progress, True, True, 'y'
+        return skip_noise_trace_flow, True, True, 'y'
 
     if confirm_clicks and 0 < threshold < 101:
         current_project.noise_trace_threshold = threshold
