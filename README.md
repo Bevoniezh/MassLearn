@@ -130,6 +130,10 @@ These steps assume you are **already in the MassLearn project folder**.
    ```bash
    python "MassLearn 2.3.py"
    ```
+5. Open a web browser and go to:
+   ```text
+   http://localhost:8060
+   ```
 
 ### Using Micromamba on Windows
 
@@ -156,7 +160,11 @@ If you prefer Micromamba, you can reuse the same `environment.yml` without modif
    ```powershell
    python "MassLearn 2.3.py"
    ```
-5. **Update the environment** in the future when dependencies change:
+5. Open a web browser and go to:
+   ```text
+   http://localhost:8060
+   ```
+6. **Update the environment** in the future when dependencies change:
    ```powershell
    micromamba update -f environment.yml
    ```
@@ -183,6 +191,10 @@ If you prefer Micromamba, you can reuse the same `environment.yml` without modif
    ```bash
    python "MassLearn 2.3.py"
    ```
+5. Open a web browser and go to:
+   ```text
+   http://localhost:8060
+   ```
 
 ## 5. Environment notes
 
@@ -199,11 +211,11 @@ Whenever you pull new changes that modify dependencies, re-run either `conda env
 
 MassLearn integrates with three Windows desktop applications. Install them before launching the login page so that you can register their paths when prompted.
 
-### 7.1 MZmine 3
+### 7.1 MZmine
 
 - Download MZmine from the [official release page](https://mzmine.github.io/download.html) and follow the installer instructions.
 - MZmine is released under the [GNU General Public License v3.0](https://www.gnu.org/licenses/gpl-3.0.en.html). Make sure you can comply with the requirements of GPLv3 (or obtain a professional license if needed).
-- After installation, **launch MZmine once manually** so the license activation dialog can complete (choose the academic or professional license type as appropriate). MassLearn will not be able to start MZmine automatically until this first-run activation succeeds.
+- After installation, **launch MZmine once manually** so any first-run setup or license activation can complete. MassLearn will not be able to start MZmine automatically until this first-run activation succeeds.
 
 ### 7.2 Registering executable paths in MassLearn
 
