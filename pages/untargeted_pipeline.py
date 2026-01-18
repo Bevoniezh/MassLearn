@@ -74,6 +74,7 @@ def get_layout():
     global treatment_groups, experiment_titles, skip, mzmine_process_start, template_to_proceed, exp_title_to_proceed
     global first_process_thread, second_process_thread, ms1_mzmine_instance, ms2_mzmine_instance, message
     global status, button_status, status2, message2, button_status2, feature_id
+    global processing_complete
     
     line_count = 2 # the first number is directly displayed with the first layout container
     current_project = None
@@ -85,6 +86,7 @@ def get_layout():
     start_time = None
     estimated_total_time = None
     failure = []
+    processing_complete = False
     template_dict = {}
     tables_list = []
     label_tables_list = []
@@ -1427,6 +1429,7 @@ convert_raw = html.Div([
 )
 def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
     global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
+    global processing_complete
 
     ctx = callback_context
     if not ctx.triggered:
@@ -1458,6 +1461,7 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         failure = []
         start_time = None
         estimated_total_time = None
+        processing_complete = False
 
         if mzml_alternative:
             processing_thread = threading.Thread(target=process_mzml_files, args=(current_project.mzml_files_path,))
@@ -1584,6 +1588,7 @@ noise_threshold = html.Div([
 )
 def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     global current_project, line_count, mzml_alternative, global_progress, failure, start_time, estimated_total_time
+    global processing_complete
 
     ctx = callback_context
     if not ctx.triggered:
@@ -1638,6 +1643,7 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     failure = []
     start_time = None
     estimated_total_time = None
+    processing_complete = False
 
     separating_line = create_separating_line(line_count)
     line_count += 1
@@ -1646,6 +1652,7 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     if skip_all_processing:
         logging_config.log_info(logger, 'All denoising steps skipped. Skipping mzML processing and moving to the next stage.')
         global_progress = 100
+        processing_complete = True
         skip_notice = html.Div(
             dbc.Alert(
                 "All denoising steps were skipped. Existing spectra will be reused without additional processing.",
@@ -1745,6 +1752,7 @@ global_progress = 0
 start_time = None
 estimated_total_time = None
 failure = []
+processing_complete = False
 def save_project():
     global current_project
     saving = current_project.save()
@@ -1756,6 +1764,7 @@ def process_files(files, proteowizard_path):
     global estimated_total_time
     global sample_names
     global failure
+    global processing_complete
 
     total_files = len(files)
 
@@ -1763,9 +1772,11 @@ def process_files(files, proteowizard_path):
         global_progress = 100
         estimated_total_time = 0
         failure.append('No files provided for conversion.')
+        processing_complete = True
         return
 
     start_time = time.time()
+    processing_complete = False
     file_type = getattr(current_project, 'raw_file_type', DEFAULT_RAW_FILE_TYPE)
     current_project.sample_names = []
     current_project.mzml_files_path = []
@@ -1842,6 +1853,7 @@ def process_files(files, proteowizard_path):
         except Exception:
             estimated_total_time = elapsed_time / 0.1
     sample_names = current_project.sample_names
+    processing_complete = True
 
 
 def process_mzml_files(files):
@@ -1851,6 +1863,7 @@ def process_mzml_files(files):
     global estimated_total_time
     global sample_names
     global failure
+    global processing_complete
 
     total_files = len(files)
 
@@ -1858,9 +1871,11 @@ def process_mzml_files(files):
         global_progress = 100
         estimated_total_time = 0
         failure.append('No mzML files detected for denoising.')
+        processing_complete = True
         return
 
     start_time = time.time()
+    processing_complete = False
     current_project.sample_names = []
     current_project.files_spectra = {}
 
@@ -1903,6 +1918,7 @@ def process_mzml_files(files):
             estimated_total_time = elapsed_time / 0.1
 
     sample_names = current_project.sample_names
+    processing_complete = True
 
 @callback(
     [Output("template-part", "children"),
@@ -1921,6 +1937,7 @@ def update_conversion_progress(n):
     global estimated_total_time
     global failure
     global mzml_alternative
+    global processing_complete
     
     progress = global_progress
     
@@ -1928,6 +1945,8 @@ def update_conversion_progress(n):
         elapsed_time = time.time() - start_time
     else:
         elapsed_time = 0
+    if estimated_total_time is None:
+        estimated_total_time = elapsed_time
     if progress > 0:
         time_remaining = estimated_total_time - elapsed_time
         minutes_remaining = int(time_remaining // 60)
@@ -1938,6 +1957,10 @@ def update_conversion_progress(n):
     else:
         title_status = "Calculating time remaining..."
     
+    if processing_complete and progress < 100:
+        progress = 100
+        global_progress = 100
+
     if progress < 100:
         return "", progress, f"{progress}%" if progress > 0 else "", None, title_status, False
     else:
