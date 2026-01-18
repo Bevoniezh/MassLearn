@@ -20,6 +20,7 @@ import shutil
 import threading
 import logging
 import subprocess
+import copy
 import numpy as np
 import pandas as pd
 import networkx as nx
@@ -200,6 +201,31 @@ def _session_log_path() -> Path:
     return module_root.parent / "log.log"
 
 
+def _project_cache_payload(project):
+    """Return a lightweight copy of the project for caching."""
+
+    if project is None:
+        return None
+
+    project_copy = copy.copy(project)
+    project_copy.files_spectra = {}
+    return project_copy
+
+
+def _cache_project_loaded(project) -> bool:
+    """Cache the current project without raising on memory pressure."""
+
+    try:
+        cache.set('project_loaded', _project_cache_payload(project))
+        return True
+    except MemoryError as exc:
+        logging_config.log_warning(logger, 'Unable to cache project in memory: %s', exc)
+        return False
+    except Exception as exc:  # pragma: no cover - defensive
+        logging_config.log_exception(logger, 'Unable to cache project in memory.', exception=exc)
+        return False
+
+
 def _spectra_dicts_from_peaks(spectra: cleaning.Spectra) -> tuple[dict, dict]:
     """Build MS1/MS2 spectra dictionaries from extracted peak arrays."""
 
@@ -250,7 +276,7 @@ def _ensure_spectra_cache(project, project_context=None) -> dict:
 
     if rebuilt_cache:
         project.files_spectra = rebuilt_cache
-        cache.set('project_loaded', project)
+        _cache_project_loaded(project)
     else:
         logging_config.log_warning(
             logger,
@@ -980,7 +1006,7 @@ def validate_project(n_submit, input_project_name):
                     if project_file.handle_existing_file_dash():
                         project_file.saving_file_dash(project=project)
                         current_project = project
-                        cache.set('project_loaded', current_project)
+                        _cache_project_loaded(current_project)
                         separating_line = create_separating_line(line_count)
                         line_count += 1
                         new_popup = html.Div(children = '', id={"type": "popup", "index": 2}, style={'display': 'none'})
@@ -992,7 +1018,7 @@ def validate_project(n_submit, input_project_name):
                         elif erase_project:
                             project_file.saving_file_dash(project=project)
                             current_project = project
-                            cache.set('project_loaded', current_project)
+                            _cache_project_loaded(current_project)
                             separating_line = create_separating_line(line_count)
                             line_count += 1
                             new_popup = html.Div(children = '', id={"type": "popup", "index": 2}, style={'display': 'none'})
@@ -1182,7 +1208,7 @@ def validate_raw_input(n_clicks):
         current_project.sample_names = []
         current_project.files_spectra = {}
         current_project.raw_files_path = []
-        cache.set('project_loaded', current_project)
+        _cache_project_loaded(current_project)
         mzml_loading = 100
         separating_line = create_separating_line(line_count)
         line_count += 1
@@ -1201,7 +1227,7 @@ def validate_raw_input(n_clicks):
     #         current_project.raw_file_type = file_type
     #         current_project.raw_files_path = get_raw_files(path_to_check, file_type)
     #         mzml_alternative = False
-    #         cache.set('project_loaded', current_project)
+    #         _cache_project_loaded(current_project)
     #         separating_line = create_separating_line(line_count)
     #         line_count += 1
     #         new_popup = html.Div(children = '', id={"type": "popup", "index": 3}, style={'display': 'none'})
@@ -1303,7 +1329,7 @@ def convert_raw_input(n_clicks, value):
     if n_clicks:
         cache.set('raw_range', value)
         current_project.rt_range = value
-        cache.set('project_loaded', current_project)
+        _cache_project_loaded(current_project)
 
         logging_config.log_info(logger, 'Min rt: %s and max rt: %s.', value[0], value[1])
         separating_line = create_separating_line(line_count)
@@ -1444,7 +1470,7 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
         current_project.ms2_noise = 0
         setattr(current_project, 'skip_ms_noise', True)
         setattr(current_project, 'skip_all_processing', True)
-        cache.set('project_loaded', current_project)
+        _cache_project_loaded(current_project)
         logging_config.log_info(logger, 'Noise trace removal skipped by the user.')
 
         if not mzml_alternative:
@@ -1494,7 +1520,7 @@ def validate_noise_raw_input(confirm_clicks, skip_clicks, threshold):
     if confirm_clicks and 0 < threshold < 101:
         current_project.noise_trace_threshold = threshold
         setattr(current_project, 'skip_noise_trace', False)
-        cache.set('project_loaded', current_project)
+        _cache_project_loaded(current_project)
 
         logging_config.log_info(logger, 'Noise trace threshold: %s', threshold)
         separating_line = create_separating_line(line_count)
@@ -1624,7 +1650,7 @@ def validate_ms_noise_input(confirm_clicks, skip_clicks, ms1, ms2):
     current_project.ms1_noise = ms1_value
     current_project.ms2_noise = ms2_value
     setattr(current_project, 'skip_ms_noise', skip_thresholds)
-    cache.set('project_loaded', current_project)
+    _cache_project_loaded(current_project)
 
     if skip_thresholds:
         logging_config.log_info(logger, 'MS1/MS2 noise thresholds skipped by the user.')
@@ -1965,7 +1991,7 @@ def update_conversion_progress(n):
         return "", progress, f"{progress}%" if progress > 0 else "", None, title_status, False
     else:
         if failure == []:
-            cache.set('project_loaded', current_project)
+            _cache_project_loaded(current_project)
             thread_project = threading.Thread(target=save_project)
             thread_project.start()
             separating_line = create_separating_line(line_count)
@@ -2232,7 +2258,7 @@ def validate_template(n_submit_template, stop_add_template_clicks, add_template_
                         remark = f'Error while loading template: {e}'
 
             if template_validity: # if oen or all tempalte are valid
-                cache.set('project_loaded', current_project)
+                _cache_project_loaded(current_project)
 
                 return '', f'{os.path.basename(template_path)} succesfully loaded.', True, None, True, None, None, template_path, 'n'
             else:
@@ -2359,7 +2385,7 @@ def manage_batch(template_n_click, batch_n_clicks, n_clicks_mzmine, n_clicks_con
             current_project.featurelist[exp_title] = exportcsv
             current_project.batch[exp_title] = batchname
 
-        cache.set('project_loaded', current_project)
+        _cache_project_loaded(current_project)
         current_project.save()
         return "", "", "Then modify batches by opening: /features/yourbatchfile.xml", True, True, None, '', 'y'
     
@@ -2406,7 +2432,7 @@ def manage_batch(template_n_click, batch_n_clicks, n_clicks_mzmine, n_clicks_con
 
         current_project.featurelist[exp_title] = exportcsv
         current_project.batch[exp_title] = batchname
-        cache.set('project_loaded', current_project)
+        _cache_project_loaded(current_project)
         current_project.save()
         return "", "", "Then modify batches by opening: /features/yourbatchfile.xml", True, True, None, '', 'y'
     
@@ -3183,7 +3209,7 @@ def deblank_and_grouping(Level, Rt_threshold, Correlation_threshold):
     current_project.msn_df_deblanked  = msn_df_deblanked
     current_project.treatment = treatment_groups
     current_project.complete = True
-    cache.set('project_loaded', current_project)
+    _cache_project_loaded(current_project)
     current_project.save()
 
     logging_config.log_info(
